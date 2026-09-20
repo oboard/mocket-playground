@@ -41,13 +41,16 @@ supported_targets = "+js"
 
 pkgtype(kind: "executable")
 `,
-  "/src/main.mbt": `/// This file compiles immediately in the browser — no local MoonBit install needed.
-fn greeting(name : String) -> String {
-  "Hello, \\{name}!"
-}
+  "/src/main.mbt": `/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
+async fn main {
+  let app = @mocket.App()
 
-fn main {
-  println(greeting("MoonBit"))
+  app.get("/hello/:name", event => {
+    let name = event.params.get("name").unwrap_or("World")
+    "Hello, \\{name}!"
+  })
+
+  app.listen(":4000")
 }
 `,
   "/src/routes.mbt": `/// Put shared route handlers here as the app grows.
@@ -79,13 +82,16 @@ const runtimeFiles: Record<string, string> = {
 };
 
 const exampleTemplates: Record<string, string> = {
-  hello: `/// This file compiles immediately in the browser — no local MoonBit install needed.
-fn greeting(name : String) -> String {
-  "Hello, \\{name}!"
-}
+  hello: `/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
+async fn main {
+  let app = @mocket.App()
 
-fn main {
-  println(greeting("MoonBit"))
+  app.get("/hello/:name", event => {
+    let name = event.params.get("name").unwrap_or("World")
+    "Hello, \\{name}!"
+  })
+
+  app.listen(":4000")
 }
 `,
   params: `async fn main {
@@ -98,7 +104,7 @@ fn main {
     "Hello, \\{name}!"
   })
 
-  app.listen("0.0.0.0:4000")
+  app.listen(":4000")
 }
 `,
   api: `async fn main {
@@ -111,7 +117,7 @@ fn main {
     })
   })
 
-  app.listen("0.0.0.0:4000")
+  app.listen(":4000")
 }
 `,
   echo: `async fn main {
@@ -123,7 +129,7 @@ fn main {
     body
   })
 
-  app.listen("0.0.0.0:4000")
+  app.listen(":4000")
 }
 `,
 };
@@ -720,11 +726,11 @@ async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebRes
 
   const result = dependencyAware
     ? await compileMocketToJavaScript({
-      code: main,
-      filename: "main.mbt",
-      files: workspace.files,
-      artifacts: artifactBundle!,
-    })
+        code: main,
+        filename: "main.mbt",
+        files: workspace.files,
+        artifacts: artifactBundle!,
+      })
     : await compileMoonBitToJavaScript({ code: main, filename: "main.mbt" });
   if (result.kind === "error") {
     compilerState.value = "error";
@@ -815,10 +821,10 @@ async function runProject() {
     const source = files.value["/src/main.mbt"] ?? "";
     const result = hasMocketDependencies
       ? await compileMocketToJavaScript({
-        code: source,
-        filename: "main.mbt",
-        artifacts: await getMocketJavaScriptArtifacts(),
-      })
+          code: source,
+          filename: "main.mbt",
+          artifacts: await getMocketJavaScriptArtifacts(),
+        })
       : await compileMoonBitToJavaScript({ code: source, filename: "main.mbt" });
     if (result.kind === "error") {
       compilerState.value = "error";
@@ -852,8 +858,9 @@ await import("./main.mjs");
     );
     await refreshExplorer();
     compilerState.value = "success";
-    compilerOutput.value = `Built /.mocket-runtime/main.mjs${hasMocketDependencies ? " with Mocket + async artifacts" : ""
-      }. Starting Node in WebContainer…`;
+    compilerOutput.value = `Built /.mocket-runtime/main.mjs${
+      hasMocketDependencies ? " with Mocket + async artifacts" : ""
+    }. Starting Node in WebContainer…`;
     runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
     const process = await webcontainer.value.spawn("node", [".mocket-runtime/run.mjs"]);
     serverProcess.value = process;
@@ -977,8 +984,8 @@ onBeforeUnmount(() => {
   <main class="playground-shell" :style="panelStyle">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span><i></i><span class="workspace-name">{{
-          projectName }}</span>
+        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span
+        ><i></i><span class="workspace-name">{{ projectName }}</span>
       </div>
       <nav>
         <button class="nav-link">Docs ↗</button>
@@ -986,17 +993,20 @@ onBeforeUnmount(() => {
           <button class="nav-link" @click="examplesOpen = !examplesOpen">Examples ▾</button>
           <div v-if="examplesOpen" class="examples-popover">
             <button @click="loadExample('hello')">
-              <b>Hello world</b><span>browser compiler</span></button><button @click="loadExample('params')">
-              <b>Route parameters</b><span>/:name</span></button><button @click="loadExample('api')">
-              <b>API group</b><span>/api/status JSON</span></button><button @click="loadExample('echo')"><b>POST
-                echo</b><span>request body</span></button>
+              <b>Hello world</b><span>/hello/:name</span></button
+            ><button @click="loadExample('params')">
+              <b>Route parameters</b><span>/:name</span></button
+            ><button @click="loadExample('api')">
+              <b>API group</b><span>/api/status JSON</span></button
+            ><button @click="loadExample('echo')"><b>POST echo</b><span>request body</span></button>
           </div>
         </div>
       </nav>
       <div class="top-actions">
-        <span class="runtime-dot" :class="runtimeState"></span><span class="runtime-label">{{ runtimeNotice
-          }}</span><button class="ghost-button" @click="resetProject">Reset</button><button class="run-button"
-          @click="runProject"><span>▶</span> Run</button>
+        <span class="runtime-dot" :class="runtimeState"></span
+        ><span class="runtime-label">{{ runtimeNotice }}</span
+        ><button class="ghost-button" @click="resetProject">Reset</button
+        ><button class="run-button" @click="runProject"><span>▶</span> Run</button>
       </div>
     </header>
 
@@ -1006,12 +1016,19 @@ onBeforeUnmount(() => {
           <span>EXPLORER</span><button title="New MoonBit file" @click="addFile">＋</button>
         </div>
         <div class="file-tree">
-          <button v-for="entry in visibleEntries" :key="entry.path" class="file-row" :class="{
-            selected: activePath === entry.path,
-            folder: entry.kind === 'folder',
-          }" :style="{ paddingLeft: `${12 + entry.depth * 15}px` }" @click="
-            entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
-            ">
+          <button
+            v-for="entry in visibleEntries"
+            :key="entry.path"
+            class="file-row"
+            :class="{
+              selected: activePath === entry.path,
+              folder: entry.kind === 'folder',
+            }"
+            :style="{ paddingLeft: `${12 + entry.depth * 15}px` }"
+            @click="
+              entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
+            "
+          >
             <span class="file-icon">{{
               entry.kind === "folder"
                 ? isFolderOpen(entry.path)
@@ -1020,19 +1037,30 @@ onBeforeUnmount(() => {
                 : entry.name.endsWith(".mbt")
                   ? "◇"
                   : "□"
-            }}</span>{{ entry.name }}
+            }}</span
+            >{{ entry.name }}
             <span v-if="entry.path === '/src/main.mbt'" class="entry-tag">main</span>
-            <span v-if="entry.kind === 'file' && entry.path !== '/src/main.mbt'" class="delete-file" title="Delete file"
-              @click.stop="removeFile(entry.path)">×</span>
+            <span
+              v-if="entry.kind === 'file' && entry.path !== '/src/main.mbt'"
+              class="delete-file"
+              title="Delete file"
+              @click.stop="removeFile(entry.path)"
+              >×</span
+            >
           </button>
         </div>
         <div class="project-meta">
           <div><span>◒</span> MoonBit</div>
-          <small>target <b>js</b></small><small>framework <b>mocket</b></small>
+          <small>target <b>js</b></small
+          ><small>framework <b>mocket</b></small>
         </div>
       </aside>
-      <div class="panel-resizer vertical explorer-resizer" role="separator" aria-label="Resize explorer"
-        @pointerdown="startResize('explorer', $event)"></div>
+      <div
+        class="panel-resizer vertical explorer-resizer"
+        role="separator"
+        aria-label="Resize explorer"
+        @pointerdown="startResize('explorer', $event)"
+      ></div>
 
       <section class="editor-panel">
         <div class="tabs">
@@ -1041,36 +1069,63 @@ onBeforeUnmount(() => {
             }}<span v-if="dirty" class="dirty">●</span><button @click="dirty = false">×</button>
           </div>
           <div class="tab-spacer"></div>
-          <button class="editor-tool" title="Format MoonBit indentation (⇧⌥F)" @click="formatCurrentFile">
-            ⌘</button><button class="editor-tool" title="More">···</button>
+          <button
+            class="editor-tool"
+            title="Format MoonBit indentation (⇧⌥F)"
+            @click="formatCurrentFile"
+          >
+            ⌘</button
+          ><button class="editor-tool" title="More">···</button>
         </div>
         <div class="editor-body">
-          <MoonbitEditor ref="editorRef" v-model="editorValue" :file-path="activePath" :project-files="files"
-            :dependency-aware="usesMocketDependencies()" @trace="handleEditorTrace" />
+          <MoonbitEditor
+            ref="editorRef"
+            v-model="editorValue"
+            :file-path="activePath"
+            :project-files="files"
+            :dependency-aware="usesMocketDependencies()"
+            @trace="handleEditorTrace"
+          />
         </div>
-        <div class="panel-resizer horizontal terminal-resizer" role="separator"
-          aria-label="Resize compiler and terminal" title="Drag to resize terminal · Double-click to reset"
-          @pointerdown="startResize('terminal', $event)" @dblclick="resetTerminalHeight"></div>
+        <div
+          class="panel-resizer horizontal terminal-resizer"
+          role="separator"
+          aria-label="Resize compiler and terminal"
+          title="Drag to resize terminal · Double-click to reset"
+          @pointerdown="startResize('terminal', $event)"
+          @dblclick="resetTerminalHeight"
+        ></div>
         <div class="terminal">
           <div class="terminal-heading">
-            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span><span>{{ terminalReady ? "WebContainer shell" :
-              "Starting WebContainer…" }}</span>
+            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span
+            ><span>{{ terminalReady ? "WebContainer shell" : "Starting WebContainer…" }}</span>
           </div>
           <div class="compiler-result" :class="compilerState">
-            <span>{{ activeIsMoonBit ? "browser build" : "file" }} ·
-              {{ activePath.split("/").pop() }}</span>
+            <span
+              >{{ activeIsMoonBit ? "browser build" : "file" }} ·
+              {{ activePath.split("/").pop() }}</span
+            >
             <pre>{{ compilerOutput }}</pre>
           </div>
-          <WebTerminal :container="webcontainer" :moonbit-bin="moonbitWasmToolchainBin"
-            :moonbit-version="moonbitToolchainVersion" @ready="terminalReady = true" />
+          <WebTerminal
+            :container="webcontainer"
+            :moonbit-bin="moonbitWasmToolchainBin"
+            :moonbit-version="moonbitToolchainVersion"
+            @ready="terminalReady = true"
+          />
         </div>
         <div class="statusbar">
-          <span>{{ activePath.split("/").pop() }}</span><span>{{ editorValue.split("\n").length }}
-            lines</span><span>MoonBit</span><span>UTF-8</span><span class="status-right">⚡ JavaScript backend</span>
+          <span>{{ activePath.split("/").pop() }}</span
+          ><span>{{ editorValue.split("\n").length }} lines</span><span>MoonBit</span
+          ><span>UTF-8</span><span class="status-right">⚡ JavaScript backend</span>
         </div>
       </section>
-      <div class="panel-resizer vertical inspector-resizer" role="separator" aria-label="Resize API client"
-        @pointerdown="startResize('inspector', $event)"></div>
+      <div
+        class="panel-resizer vertical inspector-resizer"
+        role="separator"
+        aria-label="Resize API client"
+        @pointerdown="startResize('inspector', $event)"
+      ></div>
 
       <aside class="right-panel">
         <div class="sidebar-tabs">
@@ -1081,12 +1136,19 @@ onBeforeUnmount(() => {
             Web preview
           </button>
         </div>
-        <ApiClient v-if="sidebarTab === 'api'" :base-url="previewUrl" :is-runtime-ready="runtimeState === 'running'"
-          :execute-request="executeRuntimeRequest" />
+        <ApiClient
+          v-if="sidebarTab === 'api'"
+          :base-url="previewUrl"
+          :is-runtime-ready="runtimeState === 'running'"
+          :execute-request="executeRuntimeRequest"
+        />
         <section v-else class="sidebar-preview">
           <div class="preview-heading">
-            <span><i class="preview-indicator"></i> WEB PREVIEW</span><button title="Refresh preview"
-              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)">
+            <span><i class="preview-indicator"></i> WEB PREVIEW</span
+            ><button
+              title="Refresh preview"
+              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)"
+            >
               ↻
             </button>
           </div>
