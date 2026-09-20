@@ -1,7 +1,7 @@
 {
   "name": "mocket-playground",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vp dev",
@@ -9,6 +9,11 @@
     "preview": "vp preview"
   },
   "dependencies": {
+    "@moonbit/moonpad-monaco": "^0.2.0",
+    "@webcontainer/api": "^1.6.4",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor-core": "^0.52.2",
     "vue": "^3.5.39"
   },
   "devDependencies": {
@@ -17,8 +22,8 @@
     "@vue/tsconfig": "^0.9.1",
     "typescript": "~6.0.2",
     "vite": "catalog:",
-    "vue-tsc": "^3.3.5",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vue-tsc": "^3.3.5"
   },
   "devEngines": {
     "packageManager": {
