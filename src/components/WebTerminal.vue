@@ -89,9 +89,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .terminal-host {
+  display: block;
   width: 100%;
+  min-height: 0;
   height: 100%;
   padding: 7px 9px;
   overflow: hidden;
+}
+
+/* xterm's viewport is absolutely positioned. Give its root the host's full
+   grid area so the viewport/canvas do not collapse to their content height. */
+.terminal-host :deep(.xterm) {
+  height: 100%;
 }
 </style>

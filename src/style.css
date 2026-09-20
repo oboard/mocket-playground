@@ -442,6 +442,12 @@ nav {
   border-top: 1px solid #303030;
   background: #171717;
 }
+/* WebTerminal is the final grid child. Stretch it explicitly so xterm's
+   fit addon receives the complete space left below compiler output. */
+.terminal > .terminal-host {
+  min-height: 0;
+  height: 100%;
+}
 .terminal-heading {
   display: flex;
   align-items: center;
