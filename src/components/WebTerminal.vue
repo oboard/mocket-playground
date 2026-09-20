@@ -36,10 +36,13 @@ async function startShell() {
   const inputSubscription = terminal.onData((data) => void input.write(data));
   disposeInput = () => inputSubscription.dispose();
   terminal.writeln(
-    `\x1b[36mMocket workspace ready — official MoonBit Wasm tools ${props.moonbitVersion || "installed"}: moonc, moonfmt, mooninfo.\x1b[0m`,
+    `\x1b[36mMocket workspace ready — Moon Web plus official Wasm tools ${props.moonbitVersion || "installed"}.\x1b[0m`,
   );
   terminal.writeln(
-    "\x1b[90mThe full `moon` package manager is not in the upstream Wasm archive; use browser Compile for dependency-aware Mocket builds.\x1b[0m",
+    "\x1b[90mMoon Web supports: moon check, moon build --target js, and moon run --target js.\x1b[0m",
+  );
+  terminal.writeln(
+    "\x1b[90mmoonc, moonfmt, and mooninfo are the official MoonBit Wasm tools; keep this tab open while Moon Web runs.\x1b[0m",
   );
   emit("ready");
 }

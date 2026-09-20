@@ -4,9 +4,14 @@ import { WebContainer, type FileSystemTree } from "@webcontainer/api";
 import MoonbitEditor from "./components/MoonbitEditor.vue";
 import WebTerminal from "./components/WebTerminal.vue";
 import ApiClient from "./components/ApiClient.vue";
-import { compileMocketToJavaScript, compileMoonBitToJavaScript } from "./lib/moonbitCompiler";
+import {
+  checkMocketProjectInBrowser,
+  compileMocketToJavaScript,
+  compileMoonBitToJavaScript,
+} from "./lib/moonbitCompiler";
 import { getMocketJavaScriptArtifacts } from "./lib/mocketArtifacts";
 import { installMoonbitWasmToolchain, moonbitWasmToolchainBin } from "./lib/moonbitWasmToolchain";
+import { startMoonWebBridge, type MoonWebRequest, type MoonWebResponse } from "./lib/moonWebBridge";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -18,10 +23,6 @@ type TraceEvent =
 type MoonbitEditorApi = {
   formatDocument: () => Promise<void>;
   traceMain: () => Promise<string | undefined>;
-  runSingleFile: () => Promise<
-    | { kind: "success"; output: string; diagnostics: unknown[] }
-    | { kind: "error"; stage: string; message: string; diagnostics?: unknown[] }
-  >;
 };
 
 const files = ref<Record<string, string>>({
@@ -56,11 +57,12 @@ pub fn route_greeting() -> String {
 `,
   "/README.md": `# Mocket Playground
 
-- **Compile** uses MoonBit’s browser compiler and requires no local toolchain.
+- **Run** links MoonBit to JavaScript in the browser and starts it in WebContainer Node; no local toolchain is required.
 - Mocket, moonbitlang/async, and Mocket CORS artifacts are bundled for the JavaScript target; the first Mocket Run downloads the offline bundle once.
 - **LSP trace** runs as you type for MoonBit files and decorates values in the editor.
 - **Format** normalizes indentation in the browser. The WebContainer terminal includes the official Wasm tools: \`moonc\`, \`moonfmt\`, and \`mooninfo\`.
-- The upstream Wasm archive does not include the Rust \`moon\` package manager, so dependency-aware Mocket builds continue to use the browser compiler.
+- The terminal also exposes the browser-hosted \`moon\` port: \`moon check\`, \`moon build --target js\`, and \`moon run --target js\` compile this workspace with the same offline Mocket + async artifacts as Run.
+- This is a browser port, not the upstream Rust \`moon\` binary: package fetching, Git dependencies, native targets, \`moon ide\`, and \`moon test\` are intentionally unavailable.
 `,
 });
 
@@ -140,7 +142,7 @@ const projectName = ref("mocket-starter");
 const sidebarTab = ref<"api" | "preview">("api");
 const editorRef = ref<MoonbitEditorApi | null>(null);
 const compilerState = ref<CompilerState>("idle");
-const compilerOutput = ref("Ready to compile this file in your browser.");
+const compilerOutput = ref("Ready to run this project in WebContainer.");
 const examplesOpen = ref(false);
 const runtimeNotice = ref(
   "Boot the workspace to mount the actual WebContainer filesystem and terminal.",
@@ -152,8 +154,8 @@ const moonbitToolchainVersion = ref("");
 const webcontainer = ref<WebContainer | null>(null);
 const serverProcess = ref<Awaited<ReturnType<WebContainer["spawn"]>> | null>(null);
 let bootedWebcontainer: WebContainer | null = null;
+let stopMoonWebBridge: (() => void) | undefined;
 const entries = ref<FileEntry[]>([]);
-const compileGeneration = ref(0);
 const expandedFolders = ref(new Set<string>(["/", "/src"]));
 const explorerWidth = ref(232);
 const inspectorWidth = ref(408);
@@ -298,7 +300,7 @@ function loadExample(name: keyof typeof exampleTemplates) {
   dirty.value = true;
   if (webcontainer.value)
     void webcontainer.value.fs.writeFile("/src/main.mbt", files.value["/src/main.mbt"]);
-  runtimeNotice.value = `Loaded ${name} example. Use Compile to run the active file in your browser.`;
+  runtimeNotice.value = `Loaded ${name} example. Press Run to compile it and start the server in WebContainer.`;
 }
 
 function addFile() {
@@ -332,6 +334,7 @@ async function bootWebContainer() {
     runtimeNotice.value = "Installing official MoonBit Wasm compiler tools in WebContainer…";
     const toolchain = await installMoonbitWasmToolchain(instance);
     moonbitToolchainVersion.value = toolchain.version;
+    stopMoonWebBridge = startMoonWebBridge(instance, handleMoonWebRequest);
     const updatePreview = (port: number, url: string) => {
       previewUrl.value = url;
       runtimeState.value = "running";
@@ -358,7 +361,7 @@ async function bootWebContainer() {
     webcontainer.value = instance;
     await refreshExplorer();
     runtimeState.value = "idle";
-    runtimeNotice.value = `Workspace mounted with MoonBit Wasm tools ${toolchain.version}. Use moonc, moonfmt, or mooninfo in the terminal; browser Compile still powers full Mocket runs.`;
+    runtimeNotice.value = `Workspace mounted with MoonBit Wasm tools ${toolchain.version}. Use moon check, moon build --target js, or moon run --target js in the terminal.`;
   } catch (error) {
     runtimeState.value = "error";
     runtimeNotice.value = `WebContainer unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -402,6 +405,272 @@ function formatDiagnostics(message: string, diagnostics: { message: string }[]) 
     .filter(Boolean)
     .join("\n");
   return diagnosticText ? `${message}\n\n${diagnosticText}` : message;
+}
+
+function isMoonpadEntrypointNoise(diagnostic: { errorCode?: number; message: string }) {
+  return (
+    diagnostic.errorCode === 67 ||
+    /Main function is already defined at .*main\.mbt:1:1\.$/.test(diagnostic.message)
+  );
+}
+
+function moonWebUsage() {
+  return [
+    "Moon Web — browser-hosted MoonBit workspace commands",
+    "",
+    "Usage: moon <command> [options]",
+    "",
+    "Commands implemented in this browser port:",
+    "  version                 Show the browser Moon toolchain versions",
+    "  check [--target js]     Type-check the current workspace",
+    "  build [--target js]     Build JavaScript into _build/js/debug/build",
+    "  run [--target js]       Build and execute the generated JavaScript",
+    "",
+    "The browser tab must remain open while a command is running.",
+  ].join("\n");
+}
+
+function moonWebTargetError(args: string[]) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--target") {
+      const target = args[index + 1];
+      if (target !== "js")
+        return `Moon Web currently supports only --target js (received ${target ?? "nothing"}).`;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--target=")) {
+      const target = arg.slice("--target=".length);
+      if (target !== "js")
+        return `Moon Web currently supports only --target js (received ${target}).`;
+      continue;
+    }
+    if (["--debug", "--release", "--frozen", "--build-only", "-q", ".", "src"].includes(arg))
+      continue;
+    if (arg.startsWith("-")) return `Moon Web does not support ${arg} yet.`;
+    return `Moon Web currently builds the current workspace only (unsupported selector: ${arg}).`;
+  }
+  return undefined;
+}
+
+function workspacePath(root: string, relative: string) {
+  return `${root === "/" ? "" : root}/${relative.replace(/^\/+/, "")}`;
+}
+
+async function findMoonWebProjectRoot(cwd: string) {
+  if (!webcontainer.value) throw new Error("WebContainer has not started yet.");
+  const candidates: string[] = [];
+  let current = cwd.startsWith("/") ? cwd.replace(/\/+$/, "") || "/" : "/";
+  while (!candidates.includes(current)) {
+    candidates.push(current);
+    if (current === "/") break;
+    current = current.slice(0, current.lastIndexOf("/")) || "/";
+  }
+  if (!candidates.includes("/")) candidates.push("/");
+  for (const candidate of candidates) {
+    try {
+      await webcontainer.value.fs.readFile(workspacePath(candidate, "moon.mod"), "utf-8");
+      return candidate;
+    } catch {
+      // Try the parent directory. WebContainer's shell path can be different
+      // from the FS API's mounted root, so falling back to / is intentional.
+    }
+  }
+  throw new Error("Could not find moon.mod from the terminal's current directory.");
+}
+
+async function readMoonWebWorkspace(cwd: string) {
+  if (!webcontainer.value) throw new Error("WebContainer has not started yet.");
+  const root = await findMoonWebProjectRoot(cwd);
+  const files: Record<string, string> = {};
+  const skipDirectories = new Set([".moon_db", ".mooncakes", "_build", "node_modules", ".git"]);
+  const walk = async (absolutePath: string, relativePath: string): Promise<void> => {
+    const entries = await webcontainer.value!.fs.readdir(absolutePath, { withFileTypes: true });
+    for (const entry of entries) {
+      if (skipDirectories.has(entry.name)) continue;
+      const childAbsolute = workspacePath(absolutePath, entry.name);
+      const childRelative = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        await walk(childAbsolute, childRelative);
+      } else if (
+        entry.name.endsWith(".mbt") ||
+        entry.name === "moon.mod" ||
+        entry.name === "moon.pkg"
+      ) {
+        files[`/${childRelative}`] = await webcontainer.value!.fs.readFile(childAbsolute, "utf-8");
+      }
+    }
+  };
+  await walk(root, "");
+  return { root, files };
+}
+
+function sourceDirectoryFromMoonMod(moonMod: string | undefined) {
+  return moonMod?.match(/^\s*source\s*=\s*"([^"]+)"/m)?.[1] ?? "src";
+}
+
+function outputNameFromMoonMod(moonMod: string | undefined) {
+  const packageName = moonMod?.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1] ?? "main";
+  return (
+    packageName
+      .split("/")
+      .at(-1)
+      ?.replaceAll(/[^A-Za-z0-9_.-]/g, "-") || "main"
+  );
+}
+
+function hasBrowserBundledDependencies(workspaceFiles: Record<string, string>) {
+  return Object.values(workspaceFiles).some((source) =>
+    /@mocket\.|oboard\/mocket|moonbitlang\/async/.test(source),
+  );
+}
+
+async function writeMoonWebBuild(root: string, outputName: string, js: Uint8Array) {
+  if (!webcontainer.value) throw new Error("WebContainer has not started yet.");
+  const outputDirectory = workspacePath(root, "_build/js/debug/build");
+  const outputPath = `${outputDirectory}/${outputName}.js`;
+  await webcontainer.value.fs.mkdir(outputDirectory, { recursive: true });
+  await webcontainer.value.fs.writeFile(outputPath, js);
+  await webcontainer.value.fs.writeFile(
+    `${outputDirectory}/${outputName}.moon-web-run.mjs`,
+    `import { Server } from "node:http";
+process.on("uncaughtException", error => console.error(error?.stack || error));
+process.on("unhandledRejection", error => console.error(error?.stack || error));
+const listen = Server.prototype.listen;
+Server.prototype.listen = function (...args) {
+  console.log("[mocket] http.Server.listen", args.slice(0, 2));
+  this.once("listening", () => console.log("[mocket] listening", this.address()));
+  this.once("error", error => console.error("[mocket] server error", error?.stack || error));
+  return listen.apply(this, args);
+};
+await import("./${outputName}.js");
+`,
+  );
+  return {
+    outputPath,
+    runPath: `${outputDirectory}/${outputName}.moon-web-run.mjs`,
+  };
+}
+
+async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebResponse> {
+  if (request.command === "help") {
+    return { protocol: 1, id: request.id, exitCode: 0, stdout: moonWebUsage() };
+  }
+  if (request.command === "version") {
+    return {
+      protocol: 1,
+      id: request.id,
+      exitCode: 0,
+      stdout: `moon web 0.1.0 (browser port)\nmoonc ${moonbitToolchainVersion.value || "installing"}\nbackend js`,
+    };
+  }
+
+  const targetError = moonWebTargetError(request.args);
+  if (targetError) return { protocol: 1, id: request.id, exitCode: 2, stderr: targetError };
+
+  const workspace = await readMoonWebWorkspace(request.cwd);
+  const sourceDirectory = sourceDirectoryFromMoonMod(workspace.files["/moon.mod"]);
+  const mainPath = `/${sourceDirectory}/main.mbt`;
+  const main = workspace.files[mainPath];
+  if (!main) {
+    return {
+      protocol: 1,
+      id: request.id,
+      exitCode: 1,
+      stderr: `Moon Web expects an executable entrypoint at ${mainPath}.`,
+    };
+  }
+
+  const dependencyAware = hasBrowserBundledDependencies(workspace.files);
+  const artifactBundle = dependencyAware ? await getMocketJavaScriptArtifacts() : undefined;
+  const formatMoonWebDiagnostics = (
+    message: string,
+    diagnostics: { errorCode?: number; message: string }[],
+  ) =>
+    formatDiagnostics(
+      message,
+      diagnostics.filter((diagnostic) => !isMoonpadEntrypointNoise(diagnostic)),
+    );
+
+  if (request.command === "check") {
+    if (dependencyAware) {
+      const result = await checkMocketProjectInBrowser({
+        files: workspace.files,
+        artifacts: artifactBundle!,
+      });
+      const diagnostics = result.diagnostics.filter(
+        (diagnostic) => !isMoonpadEntrypointNoise(diagnostic),
+      );
+      const errors = diagnostics.filter((diagnostic) => diagnostic.level === "error");
+      if (result.kind === "error" || errors.length > 0) {
+        const message = result.kind === "error" ? result.message : "MoonBit type checking failed.";
+        return {
+          protocol: 1,
+          id: request.id,
+          exitCode: 1,
+          stderr: formatDiagnostics(message, diagnostics),
+        };
+      }
+      return {
+        protocol: 1,
+        id: request.id,
+        exitCode: 0,
+        stdout: `Checked ${Object.keys(workspace.files).filter((path) => path.endsWith(".mbt")).length} MoonBit file(s) against bundled Mocket + async artifacts.`,
+      };
+    }
+    const result = await compileMoonBitToJavaScript({ code: main, filename: "main.mbt" });
+    if (result.kind === "error") {
+      return {
+        protocol: 1,
+        id: request.id,
+        exitCode: 1,
+        stderr: formatMoonWebDiagnostics(result.message, result.diagnostics),
+      };
+    }
+    return {
+      protocol: 1,
+      id: request.id,
+      exitCode: 0,
+      stdout: "Checked the current MoonBit entrypoint.",
+    };
+  }
+
+  const result = dependencyAware
+    ? await compileMocketToJavaScript({
+        code: main,
+        filename: "main.mbt",
+        files: workspace.files,
+        artifacts: artifactBundle!,
+      })
+    : await compileMoonBitToJavaScript({ code: main, filename: "main.mbt" });
+  if (result.kind === "error") {
+    compilerState.value = "error";
+    compilerOutput.value = formatMoonWebDiagnostics(result.message, result.diagnostics);
+    return {
+      protocol: 1,
+      id: request.id,
+      exitCode: 1,
+      stderr: compilerOutput.value,
+    };
+  }
+
+  const build = await writeMoonWebBuild(
+    workspace.root,
+    outputNameFromMoonMod(workspace.files["/moon.mod"]),
+    result.js,
+  );
+  await refreshExplorer();
+  compilerState.value = "success";
+  compilerOutput.value = `Moon Web built ${build.outputPath}${dependencyAware ? " with Mocket + async artifacts" : ""}.`;
+  runtimeNotice.value = "Moon Web generated JavaScript in WebContainer.";
+  return {
+    protocol: 1,
+    id: request.id,
+    exitCode: 0,
+    stdout: `Finished. Moon Web built ${build.outputPath}`,
+    ...(request.command === "run" ? { runPath: build.runPath } : {}),
+  };
 }
 
 async function pipeProgramOutput(process: Awaited<ReturnType<WebContainer["spawn"]>>) {
@@ -595,43 +864,12 @@ async function formatCurrentFile() {
   compilerState.value = "idle";
 }
 
-async function compileCurrentFile() {
-  if (!activeIsMoonBit.value) {
-    compilerState.value = "error";
-    compilerOutput.value = "Choose a MoonBit (.mbt) file before compiling.";
-    return;
-  }
-  if (!editorRef.value) {
-    compilerOutput.value = "The editor is still loading. Try compiling again in a moment.";
-    compilerState.value = "error";
-    return;
-  }
-  const generation = ++compileGeneration.value;
-  compilerState.value = "compiling";
-  compilerOutput.value = "Compiling in your browser…";
-  try {
-    const result = await editorRef.value.runSingleFile();
-    if (generation !== compileGeneration.value) return;
-    if (result.kind === "success") {
-      compilerState.value = "success";
-      compilerOutput.value = result.output || "Build succeeded with no program output.";
-    } else {
-      compilerState.value = "error";
-      compilerOutput.value = result.message;
-    }
-  } catch (error) {
-    if (generation !== compileGeneration.value) return;
-    compilerState.value = "error";
-    compilerOutput.value = error instanceof Error ? error.message : String(error);
-  }
-}
-
 function resetProject() {
   files.value["/src/main.mbt"] = exampleTemplates.hello;
   activePath.value = "/src/main.mbt";
   dirty.value = true;
   runtimeNotice.value =
-    "Starter project restored. Press Compile to run it entirely in your browser.";
+    "Starter project restored. Press Run to compile it and start WebContainer Node.";
 }
 
 onMounted(() => {
@@ -641,6 +879,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopResizing?.();
+  stopMoonWebBridge?.();
+  stopMoonWebBridge = undefined;
   void serverProcess.value?.kill();
   // WebContainer permits only one live instance. Release both a fully mounted
   // workspace and one still installing so browser reload/HMR can boot again.
@@ -674,12 +914,6 @@ onBeforeUnmount(() => {
       <div class="top-actions">
         <span class="runtime-dot" :class="runtimeState"></span
         ><span class="runtime-label">{{ runtimeNotice }}</span
-        ><button
-          class="ghost-button"
-          :class="`compile-${compilerState}`"
-          @click="compileCurrentFile"
-        >
-          {{ compilerState === "compiling" ? "Compiling…" : "Compile" }}</button
         ><button class="ghost-button" @click="resetProject">Reset</button
         ><button class="run-button" @click="runProject"><span>▶</span> Run</button>
       </div>
@@ -771,11 +1005,12 @@ onBeforeUnmount(() => {
         <div class="terminal">
           <div class="terminal-heading">
             <span><i class="terminal-led"></i> COMPILER & TERMINAL</span
-            ><span>{{ terminalReady ? "WebContainer shell" : "Browser compiler ready" }}</span>
+            ><span>{{ terminalReady ? "WebContainer shell" : "Starting WebContainer…" }}</span>
           </div>
           <div class="compiler-result" :class="compilerState">
             <span
-              >{{ activeIsMoonBit ? "moon run" : "file" }} · {{ activePath.split("/").pop() }}</span
+              >{{ activeIsMoonBit ? "browser build" : "file" }} ·
+              {{ activePath.split("/").pop() }}</span
             >
             <pre>{{ compilerOutput }}</pre>
           </div>

@@ -29,9 +29,9 @@ let muted = false;
 let traceTimer: ReturnType<typeof setTimeout> | undefined;
 let latestTrace = 0;
 
-// This is the MoonBit Tour integration: it registers MoonBit tokens, language
-// configuration, completions, hover and the in-browser compiler.
-const moonpad = moonbitMode.init({
+// Moonpad registers MoonBit tokens, language configuration, diagnostics and the
+// in-browser compiler. Version 0.2.0 does not ship a Monaco completion provider.
+moonbitMode.init({
   onigWasmUrl: new URL("@moonbit/moonpad-monaco/onig.wasm", import.meta.url).toString(),
 });
 const trace = moonbitMode.traceCommandFactory();
@@ -119,7 +119,7 @@ function clearDependencyMarkers(currentModel: monaco.editor.ITextModel) {
 }
 
 /**
- * moonpad-monaco currently supplies compiler/LSP features but does not expose a
+ * moonpad-monaco currently supplies compiler diagnostics but does not expose a
  * `moon fmt` API. Keep this deliberately conservative: it normalizes leading
  * indentation only and never rewrites MoonBit expressions or comments.
  */
@@ -267,8 +267,11 @@ onMounted(() => {
     padding: { top: 12 },
     renderLineHighlight: "line",
     tabSize: 2,
-    quickSuggestions: { other: true, comments: false, strings: false },
-    suggest: { showMethods: true, showFunctions: true, showFields: true },
+    // Moonpad 0.2.0 has no completion provider. Do not surface Monaco's
+    // unrelated word suggestions as if they were MoonBit language completions.
+    quickSuggestions: false,
+    suggestOnTriggerCharacters: false,
+    wordBasedSuggestions: "off",
     theme: "dark-plus",
   });
   createModel(props.modelValue, props.filePath);
@@ -303,19 +306,11 @@ watch(
   () => scheduleTrace(0),
 );
 
-async function runSingleFile() {
-  return moonpad.runSingleFile({
-    code: model?.getValue() ?? props.modelValue,
-    filename: props.filePath.split("/").pop(),
-    debugMain: true,
-  });
-}
-
 async function traceMain() {
   return traceCurrentModel();
 }
 
-defineExpose({ formatDocument, runSingleFile, traceMain });
+defineExpose({ formatDocument, traceMain });
 
 onBeforeUnmount(() => {
   if (traceTimer) clearTimeout(traceTimer);

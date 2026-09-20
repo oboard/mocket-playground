@@ -1,6 +1,9 @@
 import type { WebContainer } from "@webcontainer/api";
+import { moonWebCliSource } from "./moonWebBridge";
 
 const TOOLCHAIN_ROOT = "/tools/moonbit";
+// WebContainer FS paths are relative to the mounted project from jsh.
+const TOOLCHAIN_BIN_FROM_WORKSPACE = "tools/moonbit/bin";
 const TOOLCHAIN_MARKER = `${TOOLCHAIN_ROOT}/moon_version`;
 const ARCHIVE_URL = `${import.meta.env.BASE_URL}moonbit/moonbit-wasm.tar.gz`;
 
@@ -104,16 +107,22 @@ async function installCommandWrappers(container: Pick<WebContainer, "fs" | "spaw
   const bin = `${TOOLCHAIN_ROOT}/bin`;
   await ensureDirectory(container, bin);
   await Promise.all(
-    ["moonc", "moonfmt", "mooninfo"].map(async (command) => {
-      await container.fs.writeFile(
-        `${bin}/${command}`,
-        `#!/bin/sh\nexec node ${TOOLCHAIN_ROOT}/${command}.js "$@"\n`,
-      );
-    }),
+    ["moonc", "moonfmt", "mooninfo"]
+      .map(async (command) => {
+        await container.fs.writeFile(
+          `${bin}/${command}`,
+          `#!/bin/sh\nexec node "$(dirname "$0")/../${command}.js" "$@"\n`,
+        );
+      })
+      .concat(container.fs.writeFile(`${bin}/moon`, moonWebCliSource())),
   );
+  // `fs` paths begin at the mounted project root, while a spawned terminal sees
+  // the host-like WebContainer root. Execute chmod from the workspace instead
+  // of using the virtual leading slash so the resulting scripts are executable.
+  const executableBin = TOOLCHAIN_BIN_FROM_WORKSPACE;
   const chmod = await container.spawn("sh", [
     "-lc",
-    `chmod +x ${bin}/moonc ${bin}/moonfmt ${bin}/mooninfo`,
+    `chmod +x ${executableBin}/moonc ${executableBin}/moonfmt ${executableBin}/mooninfo ${executableBin}/moon`,
   ]);
   const exitCode = await chmod.exit;
   if (exitCode !== 0)
@@ -122,8 +131,9 @@ async function installCommandWrappers(container: Pick<WebContainer, "fs" | "spaw
 
 /**
  * Installs the official MoonBit compiler-tool Wasm distribution in the active
- * WebContainer. It intentionally exposes moonc, moonfmt and mooninfo only:
- * the archive does not ship the Rust `moon` build-system executable.
+ * WebContainer. The official archive provides moonc, moonfmt and mooninfo.
+ * The separately implemented `moon` browser port is installed as a terminal
+ * launcher which delegates package compilation to the browser compiler bridge.
  */
 export async function installMoonbitWasmToolchain(
   container: Pick<WebContainer, "fs" | "spawn">,
@@ -152,4 +162,4 @@ export async function installMoonbitWasmToolchain(
   return { version: await readText(container, TOOLCHAIN_MARKER), root: TOOLCHAIN_ROOT };
 }
 
-export const moonbitWasmToolchainBin = `${TOOLCHAIN_ROOT}/bin`;
+export const moonbitWasmToolchainBin = TOOLCHAIN_BIN_FROM_WORKSPACE;
