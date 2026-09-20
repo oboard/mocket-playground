@@ -356,7 +356,6 @@ nav {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 39px minmax(0, 1fr) minmax(174px, 25vh) 25px;
   background: #1e1e1e;
 }
 .tabs {
@@ -412,11 +411,15 @@ nav {
   color: #ddd;
 }
 .editor-body {
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 .terminal {
   display: grid;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
   grid-template-rows: 30px auto minmax(0, 1fr);
   border-top: 1px solid #303030;
   background: #171717;
@@ -500,6 +503,7 @@ nav {
   display: flex;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   flex-direction: column;
   border-left: 1px solid #303030;
   background: #1e1e1e;
@@ -636,9 +640,6 @@ nav {
   font-weight: 750;
 }
 @media (max-width: 1100px) {
-  .workspace {
-    grid-template-columns: 185px minmax(330px, 1fr) 340px;
-  }
   .runtime-label {
     display: none;
   }
@@ -653,9 +654,6 @@ nav {
   body {
     min-width: 780px;
   }
-  .workspace {
-    grid-template-columns: 170px minmax(340px, 1fr) 320px;
-  }
   .topbar {
     padding: 0 10px;
   }
@@ -664,9 +662,6 @@ nav {
   }
   .nav-link {
     padding: 6px;
-  }
-  .editor-panel {
-    grid-template-rows: 39px minmax(0, 1fr) 200px 25px;
   }
 }
 
@@ -677,15 +672,16 @@ body.is-resizing * {
   cursor: col-resize !important;
   user-select: none !important;
 }
-body.is-resizing .terminal-resizer,
-body.is-resizing .terminal-resizer * {
+body.is-resizing-terminal,
+body.is-resizing-terminal * {
   cursor: row-resize !important;
 }
 .workspace {
+  --editor-min-width: 380px;
   grid-template-columns:
     var(--explorer-width, 232px)
     5px
-    minmax(380px, 1fr)
+    minmax(var(--editor-min-width), 1fr)
     5px
     var(--inspector-width, 408px);
 }
@@ -719,6 +715,12 @@ body.is-resizing .terminal-resizer * {
 .panel-resizer.horizontal {
   cursor: row-resize;
 }
+.panel-resizer.horizontal::before {
+  position: absolute;
+  z-index: 1;
+  inset: -5px 0;
+  content: "";
+}
 .panel-resizer.horizontal::after {
   inset: 1px 0;
 }
@@ -745,21 +747,11 @@ body.is-resizing .panel-resizer::after {
 }
 @media (max-width: 1100px) {
   .workspace {
-    grid-template-columns:
-      var(--explorer-width, 200px)
-      5px
-      minmax(330px, 1fr)
-      5px
-      var(--inspector-width, 340px);
+    --editor-min-width: 330px;
   }
 }
 @media (max-width: 900px) {
   .workspace {
-    grid-template-columns:
-      var(--explorer-width, 180px)
-      5px
-      minmax(340px, 1fr)
-      5px
-      var(--inspector-width, 320px);
+    --editor-min-width: 280px;
   }
 }

@@ -160,6 +160,7 @@ const expandedFolders = ref(new Set<string>(["/", "/src"]));
 const explorerWidth = ref(232);
 const inspectorWidth = ref(408);
 const terminalHeight = ref(270);
+const workspaceRef = ref<HTMLElement | null>(null);
 let stopResizing: (() => void) | undefined;
 
 const activeIsMoonBit = computed(() => activePath.value.endsWith(".mbt"));
@@ -261,9 +262,55 @@ function toggleFolder(path: string) {
   expandedFolders.value = next;
 }
 
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+type HorizontalPanel = "explorer" | "inspector";
+
+function workbenchSizing() {
+  const width = workspaceRef.value?.getBoundingClientRect().width ?? window.innerWidth;
+  if (width <= 900) {
+    return { width, explorerMin: 160, inspectorMin: 280, editorMin: 280 };
+  }
+  if (width <= 1100) {
+    return { width, explorerMin: 180, inspectorMin: 300, editorMin: 330 };
+  }
+  return { width, explorerMin: 180, inspectorMin: 320, editorMin: 380 };
+}
+
+function fitHorizontalPanels() {
+  const { width, explorerMin, inspectorMin, editorMin } = workbenchSizing();
+  const usableSidePanelWidth = Math.max(explorerMin + inspectorMin, width - editorMin - 10);
+
+  let nextExplorer = clamp(explorerWidth.value, explorerMin, 440);
+  let nextInspector = clamp(inspectorWidth.value, inspectorMin, 620);
+  if (nextExplorer + nextInspector > usableSidePanelWidth) {
+    nextInspector = Math.max(inspectorMin, usableSidePanelWidth - nextExplorer);
+    nextExplorer = Math.max(explorerMin, usableSidePanelWidth - nextInspector);
+  }
+
+  explorerWidth.value = nextExplorer;
+  inspectorWidth.value = nextInspector;
+}
+
+function horizontalBounds(target: HorizontalPanel) {
+  fitHorizontalPanels();
+  const { width, explorerMin, inspectorMin, editorMin } = workbenchSizing();
+  const usableSidePanelWidth = Math.max(explorerMin + inspectorMin, width - editorMin - 10);
+  const min = target === "explorer" ? explorerMin : inspectorMin;
+  const maximum = target === "explorer" ? 440 : 620;
+  const otherPanelWidth = target === "explorer" ? inspectorWidth.value : explorerWidth.value;
+
+  return { min, max: Math.max(min, Math.min(maximum, usableSidePanelWidth - otherPanelWidth)) };
+}
+
 function startResize(target: "explorer" | "inspector" | "terminal", event: PointerEvent) {
+  if (event.button !== 0 || !event.isPrimary) return;
+
   event.preventDefault();
   stopResizing?.();
+  if (target !== "terminal") fitHorizontalPanels();
+
+  const handle = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
   const startX = event.clientX;
   const startY = event.clientY;
   const startSize =
@@ -272,25 +319,57 @@ function startResize(target: "explorer" | "inspector" | "terminal", event: Point
       : target === "inspector"
         ? inspectorWidth.value
         : terminalHeight.value;
-  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const terminalBounds = () => {
+    const editorPanel = handle?.parentElement;
+    const fixedPanelHeight = 39 + 5 + 25;
+    const minimumEditorHeight = 180;
+    const minimumTerminalHeight = 160;
+    const availableTerminalHeight =
+      (editorPanel?.getBoundingClientRect().height ?? window.innerHeight) -
+      fixedPanelHeight -
+      minimumEditorHeight;
+
+    return {
+      min: minimumTerminalHeight,
+      max: Math.max(minimumTerminalHeight, availableTerminalHeight),
+    };
+  };
   const move = (moveEvent: PointerEvent) => {
-    if (target === "explorer")
-      explorerWidth.value = clamp(startSize + moveEvent.clientX - startX, 180, 440);
-    if (target === "inspector")
-      inspectorWidth.value = clamp(startSize - moveEvent.clientX + startX, 320, 620);
-    if (target === "terminal")
-      terminalHeight.value = clamp(startSize - moveEvent.clientY + startY, 160, 620);
+    moveEvent.preventDefault();
+
+    if (target === "explorer") {
+      const { min, max } = horizontalBounds("explorer");
+      explorerWidth.value = clamp(startSize + moveEvent.clientX - startX, min, max);
+    }
+    if (target === "inspector") {
+      const { min, max } = horizontalBounds("inspector");
+      inspectorWidth.value = clamp(startSize - moveEvent.clientX + startX, min, max);
+    }
+    if (target === "terminal") {
+      const { min, max } = terminalBounds();
+      terminalHeight.value = clamp(startSize - moveEvent.clientY + startY, min, max);
+    }
   };
   const stop = () => {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", stop);
-    document.body.classList.remove("is-resizing");
+    window.removeEventListener("pointercancel", stop);
+    if (handle?.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    document.body.classList.remove("is-resizing", "is-resizing-terminal");
     stopResizing = undefined;
   };
+
+  handle?.setPointerCapture(event.pointerId);
   document.body.classList.add("is-resizing");
+  if (target === "terminal") document.body.classList.add("is-resizing-terminal");
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", stop, { once: true });
+  window.addEventListener("pointercancel", stop, { once: true });
   stopResizing = stop;
+}
+
+function resetTerminalHeight() {
+  terminalHeight.value = 270;
 }
 
 function loadExample(name: keyof typeof exampleTemplates) {
@@ -873,11 +952,14 @@ function resetProject() {
 }
 
 onMounted(() => {
+  fitHorizontalPanels();
+  window.addEventListener("resize", fitHorizontalPanels);
   void refreshExplorer();
   void bootWebContainer();
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", fitHorizontalPanels);
   stopResizing?.();
   stopMoonWebBridge?.();
   stopMoonWebBridge = undefined;
@@ -919,7 +1001,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <section class="workspace">
+    <section ref="workspaceRef" class="workspace">
       <aside class="file-panel">
         <div class="panel-heading">
           <span>EXPLORER</span><button title="New MoonBit file" @click="addFile">＋</button>
@@ -1000,7 +1082,9 @@ onBeforeUnmount(() => {
           class="panel-resizer horizontal terminal-resizer"
           role="separator"
           aria-label="Resize compiler and terminal"
+          title="Drag to resize terminal · Double-click to reset"
           @pointerdown="startResize('terminal', $event)"
+          @dblclick="resetTerminalHeight"
         ></div>
         <div class="terminal">
           <div class="terminal-heading">
