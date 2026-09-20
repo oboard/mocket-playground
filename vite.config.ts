@@ -99,6 +99,11 @@ async function __mocketLinkProject(input) {
   };
 }
 
+const crossOriginIsolationHeaders = {
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
 // https://vite.dev/config/
 export default defineConfig({
   fmt: {},
@@ -113,9 +118,9 @@ export default defineConfig({
     exclude: ["@moonbit/moonpad-monaco"],
   },
   server: {
-    headers: {
-      "Cross-Origin-Embedder-Policy": "require-corp",
-      "Cross-Origin-Opener-Policy": "same-origin",
-    },
+    headers: crossOriginIsolationHeaders,
+  },
+  preview: {
+    headers: crossOriginIsolationHeaders,
   },
 });
