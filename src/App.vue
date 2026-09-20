@@ -13,6 +13,21 @@ import { getMocketJavaScriptArtifacts } from "./lib/mocketArtifacts";
 import { installMoonbitWasmToolchain, moonbitWasmToolchainBin } from "./lib/moonbitWasmToolchain";
 import { startMoonWebBridge, type MoonWebRequest, type MoonWebResponse } from "./lib/moonWebBridge";
 import { examples, getExample, type ExampleId } from "./examples";
+import AddRegular from "@mingcute/vue/core-regular/add";
+import ArrowRightRegular from "@mingcute/vue/core-regular/arrow-right";
+import CloseRegular from "@mingcute/vue/core-regular/close";
+import CodeRegular from "@mingcute/vue/core-regular/code";
+import CommandRegular from "@mingcute/vue/core-regular/command";
+import CornerUpRightRegular from "@mingcute/vue/core-regular/corner-up-right";
+import Delete2Regular from "@mingcute/vue/core-regular/delete-2";
+import DownRegular from "@mingcute/vue/core-regular/down";
+import FileRegular from "@mingcute/vue/core-regular/file";
+import FlashRegular from "@mingcute/vue/core-regular/flash";
+import FolderOpenRegular from "@mingcute/vue/core-regular/folder-open";
+import FolderRegular from "@mingcute/vue/core-regular/folder";
+import MoreRegular from "@mingcute/vue/core-filled/more-1";
+import PlayFilled from "@mingcute/vue/core-filled/play";
+import Refresh3Regular from "@mingcute/vue/core-regular/refresh-3";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -42,13 +57,11 @@ supported_targets = "+js"
 
 pkgtype(kind: "executable")
 `,
-  "/src/main.mbt": `/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
-async fn main {
+  "/src/main.mbt": `async fn main {
   let app = @mocket.App()
 
-  app.get("/hello/:name", event => {
-    let name = event.params.get("name").unwrap_or("World")
-    "Hello, \\{name}!"
+  app.get("/api/hello", _ => {
+    "Hello, World!"
   })
 
   app.listen(":4000")
@@ -675,11 +688,11 @@ async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebRes
 
   const result = dependencyAware
     ? await compileMocketToJavaScript({
-        code: main,
-        filename: "main.mbt",
-        files: workspace.files,
-        artifacts: artifactBundle!,
-      })
+      code: main,
+      filename: "main.mbt",
+      files: workspace.files,
+      artifacts: artifactBundle!,
+    })
     : await compileMoonBitToJavaScript({ code: main, filename: "main.mbt" });
   if (result.kind === "error") {
     compilerState.value = "error";
@@ -770,10 +783,10 @@ async function runProject() {
     const source = files.value["/src/main.mbt"] ?? "";
     const result = hasMocketDependencies
       ? await compileMocketToJavaScript({
-          code: source,
-          filename: "main.mbt",
-          artifacts: await getMocketJavaScriptArtifacts(),
-        })
+        code: source,
+        filename: "main.mbt",
+        artifacts: await getMocketJavaScriptArtifacts(),
+      })
       : await compileMoonBitToJavaScript({ code: source, filename: "main.mbt" });
     if (result.kind === "error") {
       compilerState.value = "error";
@@ -807,9 +820,8 @@ await import("./main.mjs");
     );
     await refreshExplorer();
     compilerState.value = "success";
-    compilerOutput.value = `Built /.mocket-runtime/main.mjs${
-      hasMocketDependencies ? " with Mocket + async artifacts" : ""
-    }. Starting Node in WebContainer…`;
+    compilerOutput.value = `Built /.mocket-runtime/main.mjs${hasMocketDependencies ? " with Mocket + async artifacts" : ""
+      }. Starting Node in WebContainer…`;
     runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
     const process = await webcontainer.value.spawn("node", [".mocket-runtime/run.mjs"]);
     serverProcess.value = process;
@@ -933,149 +945,126 @@ onBeforeUnmount(() => {
   <main class="playground-shell" :style="panelStyle">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span
-        ><i></i><span class="workspace-name">{{ projectName }}</span>
+        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span><i></i><span class="workspace-name">{{
+          projectName }}</span>
       </div>
       <nav>
-        <button class="nav-link">Docs ↗</button>
+        <button class="nav-link" type="button">
+          Docs
+          <CornerUpRightRegular :size="13" aria-hidden="true" />
+        </button>
         <div class="examples-menu">
-          <button class="nav-link" @click="examplesOpen = !examplesOpen">Examples ▾</button>
-          <div v-if="examplesOpen" class="examples-popover">
-            <button
-              v-for="example in examples"
-              :key="example.name"
-              @click="loadExample(example.name)"
-            >
-              <b>{{ example.label }}</b
-              ><span>{{ example.subtitle }}</span>
+          <button class="nav-link" type="button" aria-controls="examples-menu" :aria-expanded="examplesOpen"
+            @click="examplesOpen = !examplesOpen">
+            Examples
+            <DownRegular :size="13" aria-hidden="true" />
+          </button>
+          <div v-if="examplesOpen" id="examples-menu" class="examples-popover">
+            <button v-for="example in examples" :key="example.name" @click="loadExample(example.name)">
+              <b>{{ example.label }}</b><span>{{ example.subtitle }}</span>
             </button>
           </div>
         </div>
       </nav>
       <div class="top-actions">
-        <span class="runtime-dot" :class="runtimeState"></span
-        ><span class="runtime-label">{{ runtimeNotice }}</span
-        ><button class="ghost-button" @click="resetProject">Reset</button
-        ><button class="run-button" @click="runProject"><span>▶</span> Run</button>
+        <span class="runtime-dot" :class="runtimeState"></span><span class="runtime-label">{{ runtimeNotice
+          }}</span><button class="ghost-button" @click="resetProject">Reset</button><button class="run-button"
+          type="button" @click="runProject">
+          <PlayFilled :size="13" aria-hidden="true" /> Run
+        </button>
       </div>
     </header>
 
     <section ref="workspaceRef" class="workspace">
       <aside class="file-panel">
         <div class="panel-heading">
-          <span>EXPLORER</span><button title="New MoonBit file" @click="addFile">＋</button>
-        </div>
-        <div class="file-tree">
-          <button
-            v-for="entry in visibleEntries"
-            :key="entry.path"
-            class="file-row"
-            :class="{
-              selected: activePath === entry.path,
-              folder: entry.kind === 'folder',
-            }"
-            :style="{ paddingLeft: `${12 + entry.depth * 15}px` }"
-            @click="
-              entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
-            "
-          >
-            <span class="file-icon">{{
-              entry.kind === "folder"
-                ? isFolderOpen(entry.path)
-                  ? "⌄"
-                  : "›"
-                : entry.name.endsWith(".mbt")
-                  ? "◇"
-                  : "□"
-            }}</span
-            >{{ entry.name }}
-            <span v-if="entry.path === '/src/main.mbt'" class="entry-tag">main</span>
-            <span
-              v-if="entry.kind === 'file' && entry.path !== '/src/main.mbt'"
-              class="delete-file"
-              title="Delete file"
-              @click.stop="removeFile(entry.path)"
-              >×</span
-            >
+          <span>EXPLORER</span><button type="button" title="New MoonBit file" aria-label="New MoonBit file"
+            @click="addFile">
+            <AddRegular :size="16" aria-hidden="true" />
           </button>
         </div>
+        <div class="file-tree">
+          <div v-for="entry in visibleEntries" :key="entry.path" class="file-row" :class="{
+            selected: activePath === entry.path,
+            folder: entry.kind === 'folder',
+          }" role="button" tabindex="0" :style="{ paddingLeft: `${12 + entry.depth * 15}px` }" @click="
+              entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
+              " @keydown.enter="
+              entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
+              " @keydown.space.prevent="
+              entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
+              ">
+            <span class="file-icon" aria-hidden="true">
+              <FolderOpenRegular v-if="entry.kind === 'folder' && isFolderOpen(entry.path)" :size="15" />
+              <FolderRegular v-else-if="entry.kind === 'folder'" :size="15" />
+              <CodeRegular v-else-if="entry.name.endsWith('.mbt')" :size="15" />
+              <FileRegular v-else :size="15" />
+            </span>
+            {{ entry.name }}
+            <span v-if="entry.path === '/src/main.mbt'" class="entry-tag">main</span>
+            <button v-if="entry.kind === 'file' && entry.path !== '/src/main.mbt'" class="delete-file" type="button"
+              :aria-label="`Delete ${entry.name}`" title="Delete file" @click.stop="removeFile(entry.path)">
+              <Delete2Regular :size="14" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
         <div class="project-meta">
-          <div><span>◒</span> MoonBit</div>
-          <small>target <b>js</b></small
-          ><small>framework <b>mocket</b></small>
+          <div>
+            <CodeRegular :size="14" aria-hidden="true" /> MoonBit
+          </div>
+          <small>target <b>js</b></small><small>framework <b>mocket</b></small>
         </div>
       </aside>
-      <div
-        class="panel-resizer vertical explorer-resizer"
-        role="separator"
-        aria-label="Resize explorer"
-        @pointerdown="startResize('explorer', $event)"
-      ></div>
+      <div class="panel-resizer vertical explorer-resizer" role="separator" aria-label="Resize explorer"
+        @pointerdown="startResize('explorer', $event)"></div>
 
       <section class="editor-panel">
         <div class="tabs">
           <div class="tab active">
-            <span class="moon-icon">◇</span>{{ activePath.split("/").pop()
-            }}<span v-if="dirty" class="dirty">●</span><button @click="dirty = false">×</button>
+            <CodeRegular class="moon-icon" :size="14" aria-hidden="true" />
+            {{ activePath.split("/").pop() }}<span v-if="dirty" class="dirty"></span><button type="button"
+              aria-label="Clear unsaved indicator" @click="dirty = false">
+              <CloseRegular :size="14" aria-hidden="true" />
+            </button>
           </div>
           <div class="tab-spacer"></div>
-          <button
-            class="editor-tool"
-            title="Format MoonBit indentation (⇧⌥F)"
-            @click="formatCurrentFile"
-          >
-            ⌘</button
-          ><button class="editor-tool" title="More">···</button>
+          <button class="editor-tool" type="button" title="Format MoonBit indentation (⇧⌥F)"
+            aria-label="Format MoonBit indentation" @click="formatCurrentFile">
+            <CommandRegular :size="16" aria-hidden="true" />
+          </button>
+          <button class="editor-tool" type="button" title="More editor actions" aria-label="More editor actions">
+            <MoreRegular :size="16" aria-hidden="true" />
+          </button>
         </div>
         <div class="editor-body">
-          <MoonbitEditor
-            ref="editorRef"
-            v-model="editorValue"
-            :file-path="activePath"
-            :project-files="files"
-            :dependency-aware="usesMocketDependencies()"
-            @trace="handleEditorTrace"
-          />
+          <MoonbitEditor ref="editorRef" v-model="editorValue" :file-path="activePath" :project-files="files"
+            :dependency-aware="usesMocketDependencies()" @trace="handleEditorTrace" />
         </div>
-        <div
-          class="panel-resizer horizontal terminal-resizer"
-          role="separator"
-          aria-label="Resize compiler and terminal"
-          title="Drag to resize terminal · Double-click to reset"
-          @pointerdown="startResize('terminal', $event)"
-          @dblclick="resetTerminalHeight"
-        ></div>
+        <div class="panel-resizer horizontal terminal-resizer" role="separator"
+          aria-label="Resize compiler and terminal" title="Drag to resize terminal · Double-click to reset"
+          @pointerdown="startResize('terminal', $event)" @dblclick="resetTerminalHeight"></div>
         <div class="terminal">
           <div class="terminal-heading">
-            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span
-            ><span>{{ terminalReady ? "WebContainer shell" : "Starting WebContainer…" }}</span>
+            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span><span>{{ terminalReady ? "WebContainer shell" :
+              "Starting WebContainer…" }}</span>
           </div>
           <div class="compiler-result" :class="compilerState">
-            <span
-              >{{ activeIsMoonBit ? "browser build" : "file" }} ·
-              {{ activePath.split("/").pop() }}</span
-            >
+            <span>{{ activeIsMoonBit ? "browser build" : "file" }} ·
+              {{ activePath.split("/").pop() }}</span>
             <pre>{{ compilerOutput }}</pre>
           </div>
-          <WebTerminal
-            :container="webcontainer"
-            :moonbit-bin="moonbitWasmToolchainBin"
-            :moonbit-version="moonbitToolchainVersion"
-            @ready="terminalReady = true"
-          />
+          <WebTerminal :container="webcontainer" :moonbit-bin="moonbitWasmToolchainBin"
+            :moonbit-version="moonbitToolchainVersion" @ready="terminalReady = true" />
         </div>
         <div class="statusbar">
-          <span>{{ activePath.split("/").pop() }}</span
-          ><span>{{ editorValue.split("\n").length }} lines</span><span>MoonBit</span
-          ><span>UTF-8</span><span class="status-right">⚡ JavaScript backend</span>
+          <span>{{ activePath.split("/").pop() }}</span><span>{{ editorValue.split("\n").length }}
+            lines</span><span>MoonBit</span><span>UTF-8</span><span class="status-right">
+            <FlashRegular :size="13" aria-hidden="true" /> JavaScript backend
+          </span>
         </div>
       </section>
-      <div
-        class="panel-resizer vertical inspector-resizer"
-        role="separator"
-        aria-label="Resize API client"
-        @pointerdown="startResize('inspector', $event)"
-      ></div>
+      <div class="panel-resizer vertical inspector-resizer" role="separator" aria-label="Resize API client"
+        @pointerdown="startResize('inspector', $event)"></div>
 
       <aside class="right-panel">
         <div class="sidebar-tabs">
@@ -1086,20 +1075,13 @@ onBeforeUnmount(() => {
             Web preview
           </button>
         </div>
-        <ApiClient
-          v-if="sidebarTab === 'api'"
-          :base-url="previewUrl"
-          :is-runtime-ready="runtimeState === 'running'"
-          :execute-request="executeRuntimeRequest"
-        />
+        <ApiClient v-if="sidebarTab === 'api'" :base-url="previewUrl" :is-runtime-ready="runtimeState === 'running'"
+          :execute-request="executeRuntimeRequest" />
         <section v-else class="sidebar-preview">
           <div class="preview-heading">
-            <span><i class="preview-indicator"></i> WEB PREVIEW</span
-            ><button
-              title="Refresh preview"
-              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)"
-            >
-              ↻
+            <span><i class="preview-indicator"></i> WEB PREVIEW</span><button title="Refresh preview"
+              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)">
+              <Refresh3Regular :size="16" aria-hidden="true" />
             </button>
           </div>
           <div class="preview-address">{{ previewUrl || "No server running" }}</div>
@@ -1111,7 +1093,10 @@ onBeforeUnmount(() => {
               Run the preview workspace, then use the terminal as you would in the StackBlitz
               WebContainer starter.
             </p>
-            <button @click="runProject">Mount project →</button>
+            <button type="button" @click="runProject">
+              Mount project
+              <ArrowRightRegular :size="15" aria-hidden="true" />
+            </button>
           </div>
         </section>
       </aside>

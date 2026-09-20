@@ -105,6 +105,9 @@ nav {
 }
 .nav-link,
 .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -208,6 +211,9 @@ nav {
   color: #ff8484;
 }
 .run-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 0;
   border-radius: 5px;
   background: #f36d3e;
@@ -219,10 +225,6 @@ nav {
 }
 .run-button:hover {
   background: #ff8051;
-}
-.run-button span {
-  margin-right: 4px;
-  font-size: 9px;
 }
 .workspace {
   display: grid;
@@ -252,10 +254,12 @@ nav {
   letter-spacing: 0.09em;
 }
 .panel-heading button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: #a6a6a6;
-  font-size: 18px;
   line-height: 1;
 }
 .panel-heading button:hover {
@@ -298,10 +302,12 @@ nav {
   font-weight: 650;
 }
 .file-icon {
-  width: 12px;
+  display: inline-flex;
+  width: 15px;
+  flex: 0 0 15px;
+  align-items: center;
+  justify-content: center;
   color: #dc9c58;
-  font-size: 11px;
-  text-align: center;
 }
 .file-row:not(.folder) .file-icon {
   color: #78a9e8;
@@ -315,10 +321,14 @@ nav {
   font-size: 8px;
 }
 .delete-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: auto;
+  border: 0;
+  background: transparent;
   padding: 3px 8px;
   color: #858585;
-  font-size: 15px;
 }
 .delete-file:hover {
   color: #ff8c8c;
@@ -332,10 +342,13 @@ nav {
   font-size: 11px;
 }
 .project-meta div {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: #e3e3e3;
   font-weight: 650;
 }
-.project-meta div span {
+.project-meta div svg {
   color: #f36d3e;
 }
 .project-meta small {
@@ -385,20 +398,25 @@ nav {
 }
 .tab button,
 .editor-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: #8d8d8d;
-  font-size: 14px;
 }
 .tab button {
   margin-left: auto;
 }
 .moon-icon {
+  flex: 0 0 auto;
   color: #75a9ec;
 }
 .dirty {
-  color: #f3c06a;
-  font-size: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f3c06a;
 }
 .tab-spacer {
   flex: 1;
@@ -496,6 +514,9 @@ nav {
     monospace;
 }
 .status-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
   color: #86aee7;
 }
@@ -559,10 +580,12 @@ nav {
   letter-spacing: 0.07em;
 }
 .preview-heading button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: #aaa;
-  font-size: 16px;
 }
 .preview-indicator {
   display: inline-block;
@@ -630,6 +653,9 @@ nav {
   line-height: 1.55;
 }
 .preview-cover button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   margin: auto;
   border: 0;
   border-radius: 5px;

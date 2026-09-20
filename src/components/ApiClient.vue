@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import AddRegular from "@mingcute/vue/core-regular/add";
+import CloseRegular from "@mingcute/vue/core-regular/close";
+import DownRegular from "@mingcute/vue/core-regular/down";
+import MoreRegular from "@mingcute/vue/core-filled/more-1";
 
 type RequestLog = {
   method: string;
@@ -194,18 +198,26 @@ async function sendRequest() {
   <section class="api-client" aria-label="API client">
     <header class="client-header">
       <div class="client-title">
-        <span class="client-dot"></span><span>Untitled request</span
-        ><small>{{ isRuntimeReady ? "Connected" : "Local workspace" }}</small>
+        <span class="client-dot" />
+        <span>Untitled request</span>
+        <small>
+          {{ isRuntimeReady ? "Connected" : "Local workspace" }}
+        </small>
       </div>
       <div class="client-actions">
         <button class="text-action" @click="saveRequest">{{ saved ? "Saved" : "Save" }}</button
-        ><button class="more-action" aria-label="More request actions">•••</button>
+        ><button class="more-action" type="button" aria-label="More request actions">
+          <MoreRegular :size="16" aria-hidden="true" />
+        </button>
       </div>
     </header>
 
     <div class="environment-bar">
       <span>Environment</span
-      ><button>{{ baseUrl ? "Mocket preview" : "No environment" }} <b>⌄</b></button>
+      ><button type="button">
+        {{ baseUrl ? "Mocket preview" : "No environment" }}
+        <DownRegular :size="13" aria-hidden="true" />
+      </button>
     </div>
 
     <div class="request-editor">
@@ -227,8 +239,8 @@ async function sendRequest() {
           :placeholder="`${formattedBaseUrl}/api/hello`"
           @keydown.enter="sendRequest"
         />
-        <button class="send-button" :disabled="sending" @click="sendRequest">
-          {{ sending ? "Sending" : "Send" }} <span>⌄</span>
+        <button class="send-button" type="button" :disabled="sending" @click="sendRequest">
+          {{ sending ? "Sending" : "Send" }}
         </button>
       </div>
       <p class="base-url"><span>Base URL</span>{{ formattedBaseUrl }}</p>
@@ -272,9 +284,13 @@ async function sendRequest() {
             />
             <input v-model="header.key" placeholder="Header" aria-label="Header name" />
             <input v-model="header.value" placeholder="Value" aria-label="Header value" />
-            <button aria-label="Remove header" @click="removeHeader(index)">×</button>
+            <button type="button" aria-label="Remove header" @click="removeHeader(index)">
+              <CloseRegular :size="14" aria-hidden="true" />
+            </button>
           </div>
-          <button class="add-row" @click="addHeader">+ Add header</button>
+          <button class="add-row" type="button" @click="addHeader">
+            <AddRegular :size="13" aria-hidden="true" /> Add header
+          </button>
         </div>
         <div v-else class="body-editor" :class="{ disabled: !canHaveBody }">
           <div class="body-options">
@@ -349,6 +365,7 @@ async function sendRequest() {
   color: #dedede;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
+
 .client-header {
   height: 48px;
   display: flex;
@@ -357,6 +374,7 @@ async function sendRequest() {
   padding: 0 14px;
   border-bottom: 1px solid #343434;
 }
+
 .client-title {
   display: flex;
   min-width: 0;
@@ -365,6 +383,7 @@ async function sendRequest() {
   font-size: 12px;
   font-weight: 650;
 }
+
 .client-title small {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -373,6 +392,7 @@ async function sendRequest() {
   font-size: 10px;
   font-weight: 500;
 }
+
 .client-dot {
   width: 8px;
   height: 8px;
@@ -380,11 +400,13 @@ async function sendRequest() {
   background: #ff6c37;
   box-shadow: 0 0 0 3px #3a2c27;
 }
+
 .client-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
 .text-action,
 .more-action {
   border: 0;
@@ -392,13 +414,17 @@ async function sendRequest() {
   color: #aaa;
   font: 600 11px/1 inherit;
 }
+
 .text-action:hover {
   color: #fff;
 }
+
 .more-action {
-  font-size: 15px;
-  letter-spacing: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+
 .environment-bar {
   display: flex;
   height: 31px;
@@ -414,25 +440,28 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .environment-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: transparent;
   color: #d0d0d0;
   font: 10px inherit;
 }
-.environment-bar b {
-  margin-left: 4px;
-  color: #777;
-}
+
 .request-editor {
   padding: 13px 14px 0;
   border-bottom: 1px solid #363636;
 }
+
 .url-row {
   display: grid;
   grid-template-columns: 75px minmax(0, 1fr) 76px;
   height: 39px;
 }
+
 .url-row select,
 .url-row input {
   min-width: 0;
@@ -446,35 +475,44 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .url-row select {
   padding: 0 8px;
   border-radius: 4px 0 0 4px;
   font-weight: 700;
 }
+
 .url-row input {
   border-left: 0;
   padding: 0 10px;
 }
+
 .url-row input:focus,
 .header-row input:focus,
 .body-editor textarea:focus {
   border-color: #ff6c37;
 }
+
 .method-get {
   color: #65d58e !important;
 }
+
 .method-post {
   color: #f3ad59 !important;
 }
+
 .method-put {
   color: #70b8ff !important;
 }
+
 .method-patch {
   color: #c993f9 !important;
 }
+
 .method-delete {
   color: #fa7373 !important;
 }
+
 .send-button {
   border: 0;
   border-radius: 0 4px 4px 0;
@@ -483,13 +521,11 @@ async function sendRequest() {
   font-weight: 750;
   font-size: 11px;
 }
+
 .send-button:disabled {
   opacity: 0.65;
 }
-.send-button span {
-  margin-left: 5px;
-  font-size: 9px;
-}
+
 .base-url {
   display: flex;
   gap: 8px;
@@ -504,14 +540,17 @@ async function sendRequest() {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
 .base-url span {
   color: #6f6f6f;
 }
+
 .request-tabs,
 .response-tabs {
   display: flex;
   gap: 18px;
 }
+
 .request-tabs button,
 .response-tabs button {
   position: relative;
@@ -521,10 +560,12 @@ async function sendRequest() {
   color: #919191;
   font: 11px inherit;
 }
+
 .request-tabs button.active,
 .response-tabs button.active {
   color: #fff;
 }
+
 .request-tabs button.active::after,
 .response-tabs button.active::after {
   position: absolute;
@@ -535,6 +576,7 @@ async function sendRequest() {
   background: #ff6c37;
   content: "";
 }
+
 .request-tabs span,
 .response-tabs span {
   display: inline-grid;
@@ -545,25 +587,30 @@ async function sendRequest() {
   color: #a8a8a8;
   font-size: 9px;
 }
+
 .request-content {
   min-height: 112px;
   padding: 12px 0;
 }
+
 .empty-section {
   padding: 8px 0;
   color: #aaa;
   font-size: 11px;
 }
+
 .empty-section strong {
   color: #ddd;
   font-size: 11px;
 }
+
 .empty-section p {
   margin: 6px 0 0;
   color: #777;
   font-size: 10px;
   line-height: 1.5;
 }
+
 .headers-editor {
   font:
     10px ui-monospace,
@@ -571,6 +618,7 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .header-row {
   display: grid;
   grid-template-columns: 24px minmax(60px, 1fr) minmax(60px, 1.2fr) 22px;
@@ -578,6 +626,7 @@ async function sendRequest() {
   align-items: center;
   margin-bottom: 6px;
 }
+
 .header-row input:not([type="checkbox"]) {
   min-width: 0;
   height: 28px;
@@ -589,27 +638,37 @@ async function sendRequest() {
   font: 10px inherit;
   outline: 0;
 }
+
 .header-row input[type="checkbox"] {
   accent-color: #ff6c37;
 }
+
 .header-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: #777;
-  font-size: 17px;
 }
+
 .header-labels {
   padding: 0 5px;
   color: #777;
   font-size: 9px;
 }
+
 .add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 0;
   border: 0;
   background: transparent;
   color: #ff936d;
   font: 10px inherit;
 }
+
 .body-options {
   display: flex;
   align-items: center;
@@ -618,18 +677,22 @@ async function sendRequest() {
   color: #a3a3a3;
   font-size: 10px;
 }
+
 .body-options label {
   display: flex;
   align-items: center;
   gap: 4px;
 }
+
 .body-options input {
   accent-color: #ff6c37;
 }
+
 .body-options span {
   margin-left: auto;
   color: #777;
 }
+
 .body-editor textarea {
   box-sizing: border-box;
   width: 100%;
@@ -647,29 +710,35 @@ async function sendRequest() {
     monospace;
   outline: 0;
 }
+
 .body-editor.disabled {
   opacity: 0.45;
 }
+
 .response-panel {
   min-height: 0;
   flex: 1;
   padding: 13px 14px;
   border-bottom: 1px solid #363636;
 }
+
 .response-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 13px;
 }
+
 .response-header > div:first-child {
   display: flex;
   align-items: baseline;
   gap: 9px;
 }
+
 .response-header strong {
   font-size: 12px;
 }
+
 .response-header strong + span {
   color: #60cd89;
   font:
@@ -678,9 +747,11 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .response-header .error {
   color: #fa7373;
 }
+
 .response-meta {
   display: flex;
   gap: 8px;
@@ -691,6 +762,7 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .response-code {
   box-sizing: border-box;
   max-height: 200px;
@@ -708,15 +780,18 @@ async function sendRequest() {
     monospace;
   white-space: pre-wrap;
 }
+
 .response-headers {
   color: #adbdca;
 }
+
 .history-panel {
   max-height: 145px;
   padding: 11px 14px;
   overflow: auto;
   background: #1b1b1b;
 }
+
 .history-title {
   display: flex;
   align-items: center;
@@ -728,12 +803,14 @@ async function sendRequest() {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
 .history-title button {
   border: 0;
   background: transparent;
   color: #777;
   font-size: 10px;
 }
+
 .history-row {
   display: grid;
   width: 100%;
@@ -752,25 +829,31 @@ async function sendRequest() {
     Menlo,
     monospace;
 }
+
 .history-row b {
   font-size: 9px;
 }
+
 .history-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .history-row em {
   color: #60cd89;
   font-style: normal;
 }
+
 .history-row em.failed {
   color: #fa7373;
 }
+
 .history-row small {
   color: #6f6f6f;
   font-size: 9px;
 }
+
 .history-empty {
   margin: 16px 0 6px;
   color: #727272;

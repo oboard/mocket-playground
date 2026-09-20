@@ -1,13 +1,10 @@
 import type { Example } from "./types";
 
-/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
-const code = `/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
-async fn main {
+const code = `async fn main {
   let app = @mocket.App()
 
-  app.get("/hello/:name", event => {
-    let name = event.params.get("name").unwrap_or("World")
-    "Hello, \\{name}!"
+  app.get("/api/hello", _ => {
+    "Hello, World!"
   })
 
   app.listen(":4000")
