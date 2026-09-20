@@ -75,17 +75,23 @@ function findBridgeDirectory() {
 
 function usage() {
   return [
-    "Moon Web — browser-hosted MoonBit workspace commands",
+    "The build system and package manager for MoonBit.",
     "",
-    "Usage: moon <command> [options]",
+    "Usage: moon [OPTIONS] <COMMAND>",
     "",
-    "Commands implemented in this browser port:",
-    "  version                 Show the browser Moon toolchain versions",
-    "  check [--target js]     Type-check the current workspace",
-    "  build [--target js]     Build JavaScript into _build/js/debug/build",
-    "  run [--target js]       Build and execute the generated JavaScript",
+    "Commands:",
+    "  check     Check the current package, but don't build object files",
+    "  build     Build the current package",
+    "  run       Run a main package",
+    "  version   Print version information and exit",
+    "  help      Print this message or the help of the given subcommand(s)",
     "",
-    "The browser tab must remain open while a command is running.",
+    "Options:",
+    "  -V, --version  Print all version information and exit",
+    "  -h, --help     Print help",
+    "",
+    "Moon Web compatibility note: this browser adapter implements only the commands above",
+    "for the JavaScript target. It is not the official Moon executable.",
   ].join("\\n");
 }
 

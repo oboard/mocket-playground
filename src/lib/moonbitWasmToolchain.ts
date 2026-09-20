@@ -132,8 +132,8 @@ async function installCommandWrappers(container: Pick<WebContainer, "fs" | "spaw
 /**
  * Installs the official MoonBit compiler-tool Wasm distribution in the active
  * WebContainer. The official archive provides moonc, moonfmt and mooninfo.
- * The separately implemented `moon` browser port is installed as a terminal
- * launcher which delegates package compilation to the browser compiler bridge.
+ * A separately implemented `moon` compatibility adapter is installed as a
+ * terminal launcher and delegates JavaScript package compilation to the browser bridge.
  */
 export async function installMoonbitWasmToolchain(
   container: Pick<WebContainer, "fs" | "spawn">,

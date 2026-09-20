@@ -44,10 +44,9 @@ type MoonbitEditorApi = {
 const files = ref<Record<string, string>>({
   "/moon.mod": `name = "playground/mocket-starter"
 version = "0.1.0"
-source = "src"
 preferred_target = "js"
 `,
-  "/src/moon.pkg": `import {
+  "/moon.pkg": `import {
   "moonbitlang/async",
   "oboard/mocket",
   "oboard/mocket/cors",
@@ -57,7 +56,7 @@ supported_targets = "+js"
 
 pkgtype(kind: "executable")
 `,
-  "/src/main.mbt": `async fn main {
+  "/main.mbt": `async fn main {
   let app = @mocket.App()
 
   app.get("/api/hello", _ => {
@@ -67,19 +66,18 @@ pkgtype(kind: "executable")
   app.listen(":4000")
 }
 `,
-  "/src/routes.mbt": `/// Put shared route handlers here as the app grows.
+  "/routes.mbt": `/// Put shared route handlers here as the app grows.
 pub fn route_greeting() -> String {
   "Hello, Mocket!"
 }
 `,
   "/README.md": `# Mocket Playground
 
-- **Run** links MoonBit to JavaScript in the browser and starts it in WebContainer Node; no local toolchain is required.
-- Mocket, moonbitlang/async, and Mocket CORS artifacts are bundled for the JavaScript target; the first Mocket Run downloads the offline bundle once.
-- **LSP trace** runs as you type for MoonBit files and decorates values in the editor.
-- **Format** normalizes indentation in the browser. The WebContainer terminal includes the official Wasm tools: \`moonc\`, \`moonfmt\`, and \`mooninfo\`.
-- The terminal also exposes the browser-hosted \`moon\` port: \`moon check\`, \`moon build --target js\`, and \`moon run --target js\` compile this workspace with the same offline Mocket + async artifacts as Run.
-- This is a browser port, not the upstream Rust \`moon\` binary: package fetching, Git dependencies, native targets, \`moon ide\`, and \`moon test\` are intentionally unavailable.
+- **Run** compiles the current Moon module for the JavaScript target and starts the resulting program in WebContainer Node.
+- Mocket, moonbitlang/async, and Mocket CORS artifacts are bundled for the JavaScript target; the first run downloads the offline bundle once.
+- **Format** uses the browser's MoonBit formatter for the active .mbt file. The terminal includes the official Wasm tools: moonc, moonfmt, and mooninfo.
+- The terminal provides a clearly labeled compatibility subset of Moon: \`moon check\`, \`moon build --target js\`, and \`moon run --target js\`.
+- This browser environment is not the official \`moon\` executable. Registry and Git dependencies, non-JavaScript targets, \`moon test\`, and other Moon subcommands are unavailable.
 `,
 });
 
@@ -95,7 +93,7 @@ const runtimeFiles: Record<string, string> = {
   ),
 };
 
-const activePath = ref("/src/main.mbt");
+const activePath = ref("/main.mbt");
 const editorValue = computed({
   get: () => files.value[activePath.value] ?? "",
   set: (value: string) => {
@@ -122,6 +120,7 @@ const webcontainer = ref<WebContainer | null>(null);
 const serverProcess = ref<Awaited<ReturnType<WebContainer["spawn"]>> | null>(null);
 let bootedWebcontainer: WebContainer | null = null;
 let stopMoonWebBridge: (() => void) | undefined;
+let runPromise: Promise<void> | undefined;
 const entries = ref<FileEntry[]>([]);
 const expandedFolders = ref(new Set<string>(["/", "/src"]));
 const explorerWidth = ref(232);
@@ -341,17 +340,17 @@ function resetTerminalHeight() {
 
 function loadExample(name: ExampleId) {
   const example = getExample(name);
-  files.value["/src/main.mbt"] = example.code;
-  activePath.value = "/src/main.mbt";
+  files.value["/main.mbt"] = example.code;
+  activePath.value = "/main.mbt";
   examplesOpen.value = false;
   dirty.value = true;
   if (webcontainer.value)
-    void webcontainer.value.fs.writeFile("/src/main.mbt", files.value["/src/main.mbt"]);
+    void webcontainer.value.fs.writeFile("/main.mbt", files.value["/main.mbt"]);
   runtimeNotice.value = `Loaded ${name} example. Press Run to compile it and start the server in WebContainer.`;
 }
 
 function addFile() {
-  const path = `/src/route_${Object.keys(files.value).filter((key) => key.startsWith("/src/")).length}.mbt`;
+  const path = `/route_${Object.keys(files.value).filter((key) => key.endsWith(".mbt")).length}.mbt`;
   files.value[path] =
     `/// A new Mocket route module.\npub fn handler() -> String {\n  "Hello from ${path.split("/").pop()}"\n}\n`;
   activePath.value = path;
@@ -362,9 +361,9 @@ function addFile() {
 }
 
 function removeFile(path: string) {
-  if (path === "/src/main.mbt") return;
+  if (path === "/main.mbt") return;
   delete files.value[path];
-  activePath.value = "/src/main.mbt";
+  activePath.value = "/main.mbt";
   dirty.value = true;
   if (webcontainer.value)
     void webcontainer.value.fs.rm(path, { force: true }).then(refreshExplorer);
@@ -411,7 +410,8 @@ async function bootWebContainer() {
     webcontainer.value = instance;
     await refreshExplorer();
     runtimeState.value = "idle";
-    runtimeNotice.value = `Workspace mounted with MoonBit Wasm tools ${toolchain.version}. Use moon check, moon build --target js, or moon run --target js in the terminal.`;
+    runtimeNotice.value = `Workspace mounted with MoonBit Wasm tools ${toolchain.version}. Starting the Mocket starter project…`;
+    void runProject();
   } catch (error) {
     runtimeState.value = "error";
     runtimeNotice.value = `WebContainer unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -466,42 +466,66 @@ function isMoonpadEntrypointNoise(diagnostic: { errorCode?: number; message: str
 
 function moonWebUsage() {
   return [
-    "Moon Web — browser-hosted MoonBit workspace commands",
+    "The build system and package manager for MoonBit.",
     "",
-    "Usage: moon <command> [options]",
+    "Usage: moon [OPTIONS] <COMMAND>",
     "",
-    "Commands implemented in this browser port:",
-    "  version                 Show the browser Moon toolchain versions",
-    "  check [--target js]     Type-check the current workspace",
-    "  build [--target js]     Build JavaScript into _build/js/debug/build",
-    "  run [--target js]       Build and execute the generated JavaScript",
+    "Commands:",
+    "  check     Check the current package, but don't build object files",
+    "  build     Build the current package",
+    "  run       Run a main package",
+    "  version   Print version information and exit",
+    "  help      Print this message or the help of the given subcommand(s)",
     "",
-    "The browser tab must remain open while a command is running.",
+    "Options:",
+    "  -V, --version  Print all version information and exit",
+    "  -h, --help     Print help",
+    "",
+    "Moon Web compatibility note: this browser adapter implements only the commands above",
+    "for the JavaScript target. It is not the official Moon executable.",
   ].join("\n");
 }
 
-function moonWebTargetError(args: string[]) {
+function moonWebTargetError(command: MoonWebRequest["command"], args: string[]) {
+  let selector: string | undefined;
+  let hasRelease = false;
+  let hasBuildOnly = false;
+
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--target") {
       const target = args[index + 1];
+      if (!target)
+        return "error: a value is required for '--target <TARGET>' but none was supplied";
       if (target !== "js")
-        return `Moon Web currently supports only --target js (received ${target ?? "nothing"}).`;
+        return `error: invalid value '${target}' for '--target <TARGET>'\n  [possible values: js]\n\nMoon Web supports only the JavaScript target.`;
       index += 1;
       continue;
     }
     if (arg.startsWith("--target=")) {
       const target = arg.slice("--target=".length);
       if (target !== "js")
-        return `Moon Web currently supports only --target js (received ${target}).`;
+        return `error: invalid value '${target}' for '--target <TARGET>'\n  [possible values: js]\n\nMoon Web supports only the JavaScript target.`;
       continue;
     }
-    if (["--debug", "--release", "--frozen", "--build-only", "-q", ".", "src"].includes(arg))
+    if (arg === "--release") {
+      hasRelease = true;
       continue;
-    if (arg.startsWith("-")) return `Moon Web does not support ${arg} yet.`;
-    return `Moon Web currently builds the current workspace only (unsupported selector: ${arg}).`;
+    }
+    if (arg === "--build-only" && command === "run") {
+      hasBuildOnly = true;
+      continue;
+    }
+    if (["--debug", "--frozen", "-q", "--quiet"].includes(arg)) continue;
+    if (arg.startsWith("-")) return `error: unexpected argument '${arg}' found`;
+    if (selector) return `error: unexpected argument '${arg}' found`;
+    selector = arg;
   }
-  return undefined;
+
+  if (hasRelease && hasBuildOnly) return undefined;
+  if (hasRelease || hasBuildOnly) return undefined;
+  if (!selector || selector === ".") return undefined;
+  return `error: Moon Web only supports the current package selector (received '${selector}').`;
 }
 
 function workspacePath(root: string, relative: string) {
@@ -556,10 +580,6 @@ async function readMoonWebWorkspace(cwd: string) {
   return { root, files };
 }
 
-function sourceDirectoryFromMoonMod(moonMod: string | undefined) {
-  return moonMod?.match(/^\s*source\s*=\s*"([^"]+)"/m)?.[1] ?? "src";
-}
-
 function outputNameFromMoonMod(moonMod: string | undefined) {
   const packageName = moonMod?.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1] ?? "main";
   return (
@@ -576,9 +596,14 @@ function hasBrowserBundledDependencies(workspaceFiles: Record<string, string>) {
   );
 }
 
-async function writeMoonWebBuild(root: string, outputName: string, js: Uint8Array) {
+async function writeMoonWebBuild(
+  root: string,
+  outputName: string,
+  js: Uint8Array,
+  release = false,
+) {
   if (!webcontainer.value) throw new Error("WebContainer has not started yet.");
-  const outputDirectory = workspacePath(root, "_build/js/debug/build");
+  const outputDirectory = workspacePath(root, `_build/js/${release ? "release" : "debug"}/build`);
   const outputPath = `${outputDirectory}/${outputName}.js`;
   await webcontainer.value.fs.mkdir(outputDirectory, { recursive: true });
   await webcontainer.value.fs.writeFile(outputPath, js);
@@ -608,27 +633,43 @@ async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebRes
     return { protocol: 1, id: request.id, exitCode: 0, stdout: moonWebUsage() };
   }
   if (request.command === "version") {
+    const args = request.args;
+    if (args.some((arg) => !["--all", "--json", "--no-path"].includes(arg))) {
+      return {
+        protocol: 1,
+        id: request.id,
+        exitCode: 2,
+        stderr: `error: unexpected argument '${args.find((arg) => !["--all", "--json", "--no-path"].includes(arg))}' found`,
+      };
+    }
+    const version = moonbitToolchainVersion.value || "unknown";
+    const item = {
+      name: "moon",
+      version: `browser compatibility adapter (MoonBit Wasm tools ${version})`,
+    };
     return {
       protocol: 1,
       id: request.id,
       exitCode: 0,
-      stdout: `moon web 0.1.0 (browser port)\nmoonc ${moonbitToolchainVersion.value || "installing"}\nbackend js`,
+      stdout: args.includes("--json")
+        ? JSON.stringify({ items: [item] })
+        : `${item.name} ${item.version}\n\nThis is not the official Moon executable; only JavaScript build compatibility is available.`,
     };
   }
 
-  const targetError = moonWebTargetError(request.args);
+  const targetError = moonWebTargetError(request.command, request.args);
   if (targetError) return { protocol: 1, id: request.id, exitCode: 2, stderr: targetError };
 
   const workspace = await readMoonWebWorkspace(request.cwd);
-  const sourceDirectory = sourceDirectoryFromMoonMod(workspace.files["/moon.mod"]);
-  const mainPath = `/${sourceDirectory}/main.mbt`;
+  const mainPath = "/main.mbt";
   const main = workspace.files[mainPath];
   if (!main) {
     return {
       protocol: 1,
       id: request.id,
       exitCode: 1,
-      stderr: `Moon Web expects an executable entrypoint at ${mainPath}.`,
+      stderr:
+        "error: no main package was found in the current module. Moon Web currently runs /main.mbt only.",
     };
   }
 
@@ -688,11 +729,11 @@ async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebRes
 
   const result = dependencyAware
     ? await compileMocketToJavaScript({
-      code: main,
-      filename: "main.mbt",
-      files: workspace.files,
-      artifacts: artifactBundle!,
-    })
+        code: main,
+        filename: "main.mbt",
+        files: workspace.files,
+        artifacts: artifactBundle!,
+      })
     : await compileMoonBitToJavaScript({ code: main, filename: "main.mbt" });
   if (result.kind === "error") {
     compilerState.value = "error";
@@ -709,6 +750,7 @@ async function handleMoonWebRequest(request: MoonWebRequest): Promise<MoonWebRes
     workspace.root,
     outputNameFromMoonMod(workspace.files["/moon.mod"]),
     result.js,
+    request.args.includes("--release"),
   );
   await refreshExplorer();
   compilerState.value = "success";
@@ -758,13 +800,13 @@ async function pipeProgramOutput(process: Awaited<ReturnType<WebContainer["spawn
   }
 }
 
-async function runProject() {
+async function runProjectInternal() {
   const hasMocketDependencies = usesMocketDependencies();
 
   compilerState.value = "compiling";
   compilerOutput.value = hasMocketDependencies
     ? "Loading built-in Mocket + async JavaScript artifacts…"
-    : "Compiling /src/main.mbt to JavaScript in your browser…";
+    : "Compiling /main.mbt to JavaScript in your browser…";
   runtimeState.value = "booting";
   runtimeNotice.value = hasMocketDependencies
     ? "Preparing the offline Mocket JavaScript compiler for WebContainer Node…"
@@ -780,13 +822,13 @@ async function runProject() {
   previewUrl.value = "";
 
   try {
-    const source = files.value["/src/main.mbt"] ?? "";
+    const source = files.value["/main.mbt"] ?? "";
     const result = hasMocketDependencies
       ? await compileMocketToJavaScript({
-        code: source,
-        filename: "main.mbt",
-        artifacts: await getMocketJavaScriptArtifacts(),
-      })
+          code: source,
+          filename: "main.mbt",
+          artifacts: await getMocketJavaScriptArtifacts(),
+        })
       : await compileMoonBitToJavaScript({ code: source, filename: "main.mbt" });
     if (result.kind === "error") {
       compilerState.value = "error";
@@ -820,8 +862,9 @@ await import("./main.mjs");
     );
     await refreshExplorer();
     compilerState.value = "success";
-    compilerOutput.value = `Built /.mocket-runtime/main.mjs${hasMocketDependencies ? " with Mocket + async artifacts" : ""
-      }. Starting Node in WebContainer…`;
+    compilerOutput.value = `Built /.mocket-runtime/main.mjs${
+      hasMocketDependencies ? " with Mocket + async artifacts" : ""
+    }. Starting Node in WebContainer…`;
     runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
     const process = await webcontainer.value.spawn("node", [".mocket-runtime/run.mjs"]);
     serverProcess.value = process;
@@ -833,6 +876,14 @@ await import("./main.mjs");
     compilerOutput.value = message;
     runtimeNotice.value = `Unable to run browser-compiled JavaScript: ${message}`;
   }
+}
+
+function runProject() {
+  if (runPromise) return runPromise;
+  runPromise = runProjectInternal().finally(() => {
+    runPromise = undefined;
+  });
+  return runPromise;
 }
 
 async function executeRuntimeRequest(request: {
@@ -914,8 +965,8 @@ async function formatCurrentFile() {
 }
 
 function resetProject() {
-  files.value["/src/main.mbt"] = getExample("hello").code;
-  activePath.value = "/src/main.mbt";
+  files.value["/main.mbt"] = getExample("hello").code;
+  activePath.value = "/main.mbt";
   dirty.value = true;
   runtimeNotice.value =
     "Starter project restored. Press Run to compile it and start WebContainer Node.";
@@ -945,8 +996,8 @@ onBeforeUnmount(() => {
   <main class="playground-shell" :style="panelStyle">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span><i></i><span class="workspace-name">{{
-          projectName }}</span>
+        <span class="brand-mark">M</span><span>Mocket <b>Playground</b></span
+        ><i></i><span class="workspace-name">{{ projectName }}</span>
       </div>
       <nav>
         <button class="nav-link" type="button">
@@ -954,22 +1005,33 @@ onBeforeUnmount(() => {
           <CornerUpRightRegular :size="13" aria-hidden="true" />
         </button>
         <div class="examples-menu">
-          <button class="nav-link" type="button" aria-controls="examples-menu" :aria-expanded="examplesOpen"
-            @click="examplesOpen = !examplesOpen">
+          <button
+            class="nav-link"
+            type="button"
+            aria-controls="examples-menu"
+            :aria-expanded="examplesOpen"
+            @click="examplesOpen = !examplesOpen"
+          >
             Examples
             <DownRegular :size="13" aria-hidden="true" />
           </button>
           <div v-if="examplesOpen" id="examples-menu" class="examples-popover">
-            <button v-for="example in examples" :key="example.name" @click="loadExample(example.name)">
-              <b>{{ example.label }}</b><span>{{ example.subtitle }}</span>
+            <button
+              v-for="example in examples"
+              :key="example.name"
+              @click="loadExample(example.name)"
+            >
+              <b>{{ example.label }}</b
+              ><span>{{ example.subtitle }}</span>
             </button>
           </div>
         </div>
       </nav>
       <div class="top-actions">
-        <span class="runtime-dot" :class="runtimeState"></span><span class="runtime-label">{{ runtimeNotice
-          }}</span><button class="ghost-button" @click="resetProject">Reset</button><button class="run-button"
-          type="button" @click="runProject">
+        <span class="runtime-dot" :class="runtimeState"></span
+        ><span class="runtime-label">{{ runtimeNotice }}</span
+        ><button class="ghost-button" @click="resetProject">Reset</button
+        ><button class="run-button" type="button" @click="runProject">
           <PlayFilled :size="13" aria-hidden="true" /> Run
         </button>
       </div>
@@ -978,93 +1040,154 @@ onBeforeUnmount(() => {
     <section ref="workspaceRef" class="workspace">
       <aside class="file-panel">
         <div class="panel-heading">
-          <span>EXPLORER</span><button type="button" title="New MoonBit file" aria-label="New MoonBit file"
-            @click="addFile">
+          <span>EXPLORER</span
+          ><button
+            type="button"
+            title="New MoonBit file"
+            aria-label="New MoonBit file"
+            @click="addFile"
+          >
             <AddRegular :size="16" aria-hidden="true" />
           </button>
         </div>
         <div class="file-tree">
-          <div v-for="entry in visibleEntries" :key="entry.path" class="file-row" :class="{
-            selected: activePath === entry.path,
-            folder: entry.kind === 'folder',
-          }" role="button" tabindex="0" :style="{ paddingLeft: `${12 + entry.depth * 15}px` }" @click="
+          <div
+            v-for="entry in visibleEntries"
+            :key="entry.path"
+            class="file-row"
+            :class="{
+              selected: activePath === entry.path,
+              folder: entry.kind === 'folder',
+            }"
+            role="button"
+            tabindex="0"
+            :style="{ paddingLeft: `${12 + entry.depth * 15}px` }"
+            @click="
               entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
-              " @keydown.enter="
+            "
+            @keydown.enter="
               entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
-              " @keydown.space.prevent="
+            "
+            @keydown.space.prevent="
               entry.kind === 'folder' ? toggleFolder(entry.path) : openFile(entry.path, entry.kind)
-              ">
+            "
+          >
             <span class="file-icon" aria-hidden="true">
-              <FolderOpenRegular v-if="entry.kind === 'folder' && isFolderOpen(entry.path)" :size="15" />
+              <FolderOpenRegular
+                v-if="entry.kind === 'folder' && isFolderOpen(entry.path)"
+                :size="15"
+              />
               <FolderRegular v-else-if="entry.kind === 'folder'" :size="15" />
               <CodeRegular v-else-if="entry.name.endsWith('.mbt')" :size="15" />
               <FileRegular v-else :size="15" />
             </span>
             {{ entry.name }}
-            <span v-if="entry.path === '/src/main.mbt'" class="entry-tag">main</span>
-            <button v-if="entry.kind === 'file' && entry.path !== '/src/main.mbt'" class="delete-file" type="button"
-              :aria-label="`Delete ${entry.name}`" title="Delete file" @click.stop="removeFile(entry.path)">
+            <span v-if="entry.path === '/main.mbt'" class="entry-tag">main</span>
+            <button
+              v-if="entry.kind === 'file' && entry.path !== '/main.mbt'"
+              class="delete-file"
+              type="button"
+              :aria-label="`Delete ${entry.name}`"
+              title="Delete file"
+              @click.stop="removeFile(entry.path)"
+            >
               <Delete2Regular :size="14" aria-hidden="true" />
             </button>
           </div>
         </div>
         <div class="project-meta">
-          <div>
-            <CodeRegular :size="14" aria-hidden="true" /> MoonBit
-          </div>
-          <small>target <b>js</b></small><small>framework <b>mocket</b></small>
+          <div><CodeRegular :size="14" aria-hidden="true" /> MoonBit</div>
+          <small>target <b>js</b></small
+          ><small>framework <b>mocket</b></small>
         </div>
       </aside>
-      <div class="panel-resizer vertical explorer-resizer" role="separator" aria-label="Resize explorer"
-        @pointerdown="startResize('explorer', $event)"></div>
+      <div
+        class="panel-resizer vertical explorer-resizer"
+        role="separator"
+        aria-label="Resize explorer"
+        @pointerdown="startResize('explorer', $event)"
+      ></div>
 
       <section class="editor-panel">
         <div class="tabs">
           <div class="tab active">
             <CodeRegular class="moon-icon" :size="14" aria-hidden="true" />
-            {{ activePath.split("/").pop() }}<span v-if="dirty" class="dirty"></span><button type="button"
-              aria-label="Clear unsaved indicator" @click="dirty = false">
+            {{ activePath.split("/").pop() }}<span v-if="dirty" class="dirty"></span
+            ><button type="button" aria-label="Clear unsaved indicator" @click="dirty = false">
               <CloseRegular :size="14" aria-hidden="true" />
             </button>
           </div>
           <div class="tab-spacer"></div>
-          <button class="editor-tool" type="button" title="Format MoonBit indentation (⇧⌥F)"
-            aria-label="Format MoonBit indentation" @click="formatCurrentFile">
+          <button
+            class="editor-tool"
+            type="button"
+            title="Format MoonBit indentation (⇧⌥F)"
+            aria-label="Format MoonBit indentation"
+            @click="formatCurrentFile"
+          >
             <CommandRegular :size="16" aria-hidden="true" />
           </button>
-          <button class="editor-tool" type="button" title="More editor actions" aria-label="More editor actions">
+          <button
+            class="editor-tool"
+            type="button"
+            title="More editor actions"
+            aria-label="More editor actions"
+          >
             <MoreRegular :size="16" aria-hidden="true" />
           </button>
         </div>
         <div class="editor-body">
-          <MoonbitEditor ref="editorRef" v-model="editorValue" :file-path="activePath" :project-files="files"
-            :dependency-aware="usesMocketDependencies()" @trace="handleEditorTrace" />
+          <MoonbitEditor
+            ref="editorRef"
+            v-model="editorValue"
+            :file-path="activePath"
+            :project-files="files"
+            :dependency-aware="usesMocketDependencies()"
+            @trace="handleEditorTrace"
+          />
         </div>
-        <div class="panel-resizer horizontal terminal-resizer" role="separator"
-          aria-label="Resize compiler and terminal" title="Drag to resize terminal · Double-click to reset"
-          @pointerdown="startResize('terminal', $event)" @dblclick="resetTerminalHeight"></div>
+        <div
+          class="panel-resizer horizontal terminal-resizer"
+          role="separator"
+          aria-label="Resize compiler and terminal"
+          title="Drag to resize terminal · Double-click to reset"
+          @pointerdown="startResize('terminal', $event)"
+          @dblclick="resetTerminalHeight"
+        ></div>
         <div class="terminal">
           <div class="terminal-heading">
-            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span><span>{{ terminalReady ? "WebContainer shell" :
-              "Starting WebContainer…" }}</span>
+            <span><i class="terminal-led"></i> COMPILER & TERMINAL</span
+            ><span>{{ terminalReady ? "WebContainer shell" : "Starting WebContainer…" }}</span>
           </div>
           <div class="compiler-result" :class="compilerState">
-            <span>{{ activeIsMoonBit ? "browser build" : "file" }} ·
-              {{ activePath.split("/").pop() }}</span>
+            <span
+              >{{ activeIsMoonBit ? "browser build" : "file" }} ·
+              {{ activePath.split("/").pop() }}</span
+            >
             <pre>{{ compilerOutput }}</pre>
           </div>
-          <WebTerminal :container="webcontainer" :moonbit-bin="moonbitWasmToolchainBin"
-            :moonbit-version="moonbitToolchainVersion" @ready="terminalReady = true" />
+          <WebTerminal
+            :container="webcontainer"
+            :moonbit-bin="moonbitWasmToolchainBin"
+            :moonbit-version="moonbitToolchainVersion"
+            @ready="terminalReady = true"
+          />
         </div>
         <div class="statusbar">
-          <span>{{ activePath.split("/").pop() }}</span><span>{{ editorValue.split("\n").length }}
-            lines</span><span>MoonBit</span><span>UTF-8</span><span class="status-right">
+          <span>{{ activePath.split("/").pop() }}</span
+          ><span>{{ editorValue.split("\n").length }} lines</span><span>MoonBit</span
+          ><span>UTF-8</span
+          ><span class="status-right">
             <FlashRegular :size="13" aria-hidden="true" /> JavaScript backend
           </span>
         </div>
       </section>
-      <div class="panel-resizer vertical inspector-resizer" role="separator" aria-label="Resize API client"
-        @pointerdown="startResize('inspector', $event)"></div>
+      <div
+        class="panel-resizer vertical inspector-resizer"
+        role="separator"
+        aria-label="Resize API client"
+        @pointerdown="startResize('inspector', $event)"
+      ></div>
 
       <aside class="right-panel">
         <div class="sidebar-tabs">
@@ -1075,12 +1198,19 @@ onBeforeUnmount(() => {
             Web preview
           </button>
         </div>
-        <ApiClient v-if="sidebarTab === 'api'" :base-url="previewUrl" :is-runtime-ready="runtimeState === 'running'"
-          :execute-request="executeRuntimeRequest" />
+        <ApiClient
+          v-if="sidebarTab === 'api'"
+          :base-url="previewUrl"
+          :is-runtime-ready="runtimeState === 'running'"
+          :execute-request="executeRuntimeRequest"
+        />
         <section v-else class="sidebar-preview">
           <div class="preview-heading">
-            <span><i class="preview-indicator"></i> WEB PREVIEW</span><button title="Refresh preview"
-              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)">
+            <span><i class="preview-indicator"></i> WEB PREVIEW</span
+            ><button
+              title="Refresh preview"
+              @click="previewUrl && (previewUrl = `${previewUrl.split('?')[0]}?t=${Date.now()}`)"
+            >
               <Refresh3Regular :size="16" aria-hidden="true" />
             </button>
           </div>
