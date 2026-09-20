@@ -1,0 +1,14 @@
+src/App.vue
+  h_c7606fb8f0c97c 23,31-32,38,41-42,44-46,53,77,80,85,88-108,111,114-122,288-290,343,350,354,432,478-481,483-489,515-518,525,527,529-531,543-547,560,573,576,601,613-620,626-630,632-635,639,641,644,646
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "dbb0275cf03f7fbd09dcea6b635a7a5ace1ba62f",
+  "prompts": {},
+  "humans": {
+    "h_c7606fb8f0c97c": {
+      "author": "oboard <oboard@outlook.com>"
+    }
+  }
+}
