@@ -4,6 +4,7 @@ import { WebContainer, type FileSystemTree } from "@webcontainer/api";
 import MoonbitEditor from "./components/MoonbitEditor.vue";
 import WebTerminal from "./components/WebTerminal.vue";
 import ApiClient from "./components/ApiClient.vue";
+import { compileMoonBitToJavaScript } from "./lib/moonbitCompiler";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -57,24 +58,12 @@ const runtimeFiles: Record<string, string> = {
   "/package.json": JSON.stringify(
     {
       name: "mocket-webcontainer-runtime",
+      private: true,
       type: "module",
-      dependencies: { express: "latest" },
-      scripts: { start: "node server.mjs" },
     },
     null,
     2,
   ),
-  "/server.mjs": `import express from "express";
-
-const app = express();
-const port = 3111;
-app.use(express.json());
-app.get("/", (_request, response) => response.send("Mocket preview is ready."));
-app.get("/api/hello", (_request, response) => response.json({ message: "Hello from Mocket!", runtime: "MoonBit JS" }));
-app.get("/api/status", (_request, response) => response.json({ ok: true, framework: "mocket" }));
-app.post("/echo", (request, response) => response.json(request.body));
-app.listen(port, () => console.log(\`Mocket preview ready at http://localhost:\${port}\`));
-`,
 };
 
 const exampleTemplates: Record<string, string> = {
@@ -129,6 +118,7 @@ const editorValue = computed({
   get: () => files.value[activePath.value] ?? "",
   set: (value: string) => {
     files.value[activePath.value] = value;
+    mocketRuntimeBlocked.value = false;
     dirty.value = true;
     if (webcontainer.value) void webcontainer.value.fs.writeFile(activePath.value, value);
   },
@@ -148,6 +138,7 @@ const previewUrl = ref("");
 const terminalReady = ref(false);
 const webcontainer = ref<WebContainer | null>(null);
 const serverProcess = ref<Awaited<ReturnType<WebContainer["spawn"]>> | null>(null);
+const mocketRuntimeBlocked = ref(false);
 const entries = ref<FileEntry[]>([]);
 const compileGeneration = ref(0);
 const expandedFolders = ref(new Set<string>(["/", "/src"]));
@@ -333,7 +324,7 @@ async function bootWebContainer() {
     await refreshExplorer();
     runtimeState.value = "idle";
     runtimeNotice.value =
-      "Workspace mounted. Compile MoonBit in the browser, or Run the WebContainer preview runtime.";
+      "Workspace mounted. Compile MoonBit in the browser, then Run writes the generated JavaScript to WebContainer Node.";
   } catch (error) {
     runtimeState.value = "error";
     runtimeNotice.value = `WebContainer unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -367,21 +358,105 @@ async function syncFiles() {
   await refreshExplorer();
 }
 
-async function runProject() {
-  await bootWebContainer();
-  if (!webcontainer.value || serverProcess.value) return;
-  await syncFiles();
-  runtimeState.value = "booting";
-  runtimeNotice.value = "Installing the WebContainer preview runtime…";
+function usesMocketDependencies() {
+  return Object.values(files.value).some((source) => /@mocket\.|oboard\/mocket/.test(source));
+}
+
+function formatDiagnostics(message: string, diagnostics: { message: string }[]) {
+  const diagnosticText = diagnostics
+    .map((diagnostic) => diagnostic.message)
+    .filter(Boolean)
+    .join("\n");
+  return diagnosticText ? `${message}\n\n${diagnosticText}` : message;
+}
+
+async function pipeProgramOutput(process: Awaited<ReturnType<WebContainer["spawn"]>>) {
+  let output = "";
   try {
-    const installProcess = await webcontainer.value.spawn("npm", ["install"]);
-    const exitCode = await installProcess.exit;
-    if (exitCode !== 0) throw new Error(`npm install exited with ${exitCode}`);
-    runtimeNotice.value = "Starting the WebContainer preview…";
-    serverProcess.value = await webcontainer.value.spawn("npm", ["run", "start"]);
+    await process.output.pipeTo(
+      new WritableStream<string>({
+        write(chunk) {
+          output += chunk;
+          compilerOutput.value = output || "Program is running in WebContainer…";
+        },
+      }),
+    );
+    const exitCode = await process.exit;
+    if (serverProcess.value === process) serverProcess.value = null;
+    if (!previewUrl.value) {
+      runtimeState.value = exitCode === 0 ? "idle" : "error";
+      runtimeNotice.value =
+        exitCode === 0
+          ? "MoonBit JavaScript finished in WebContainer. This program did not open an HTTP port."
+          : `MoonBit JavaScript exited with code ${exitCode}.`;
+    }
   } catch (error) {
+    if (serverProcess.value === process) serverProcess.value = null;
     runtimeState.value = "error";
-    runtimeNotice.value = `Unable to start preview: ${error instanceof Error ? error.message : String(error)}`;
+    runtimeNotice.value = `Unable to read Node output: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+async function runProject() {
+  // Do this before awaiting WebContainer boot. The editor's background trace
+  // can otherwise overwrite this actionable project-level diagnostic.
+  if (usesMocketDependencies()) {
+    mocketRuntimeBlocked.value = true;
+    runtimeState.value = "error";
+    compilerState.value = "error";
+    const message =
+      "This starter has Mocket imports, but its JS dependency artifacts are not loaded yet. " +
+      "Moonpad’s bundled linker contains MoonBit core only, so it cannot truthfully build @mocket.App() until the Mocket/async/x .mi and .core bundle is added.";
+    compilerOutput.value = message;
+    runtimeNotice.value = message;
+    return;
+  }
+
+  mocketRuntimeBlocked.value = false;
+  await bootWebContainer();
+  if (!webcontainer.value) return;
+  await syncFiles();
+  if (serverProcess.value) {
+    serverProcess.value.kill();
+    serverProcess.value = null;
+  }
+  previewUrl.value = "";
+  runtimeState.value = "booting";
+  compilerState.value = "compiling";
+  compilerOutput.value = "Compiling /src/main.mbt to JavaScript in your browser…";
+  runtimeNotice.value = "Linking standalone MoonBit JavaScript for WebContainer Node…";
+
+  try {
+    const result = await compileMoonBitToJavaScript({
+      code: files.value["/src/main.mbt"] ?? "",
+      filename: "main.mbt",
+    });
+    if (result.kind === "error") {
+      compilerState.value = "error";
+      runtimeState.value = "error";
+      compilerOutput.value = formatDiagnostics(result.message, result.diagnostics);
+      runtimeNotice.value = "MoonBit compilation failed before Node could start.";
+      return;
+    }
+
+    await webcontainer.value.fs.mkdir("/.mocket-runtime", { recursive: true });
+    await webcontainer.value.fs.writeFile(
+      "/.mocket-runtime/main.mjs",
+      new TextDecoder().decode(result.js),
+    );
+    await refreshExplorer();
+    compilerState.value = "success";
+    compilerOutput.value = "Built /.mocket-runtime/main.mjs. Starting Node in WebContainer…";
+    runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
+    const process = await webcontainer.value.spawn("node", [".mocket-runtime/main.mjs"]);
+    serverProcess.value = process;
+    void pipeProgramOutput(process);
+  } catch (error) {
+    compilerState.value = "error";
+    runtimeState.value = "error";
+    const message = error instanceof Error ? error.message : String(error);
+    compilerOutput.value = message;
+    runtimeNotice.value = `Unable to run browser-compiled JavaScript: ${message}`;
   }
 }
 
@@ -393,6 +468,7 @@ async function openFile(path: string, kind: EntryKind) {
 
 function handleEditorTrace(event: TraceEvent) {
   if (
+    mocketRuntimeBlocked.value ||
     event.filePath !== activePath.value ||
     !activeIsMoonBit.value ||
     compilerState.value === "compiling"
