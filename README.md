@@ -48,6 +48,23 @@ MOCKET_SOURCE=/absolute/path/to/oboard/mocket node scripts/generate-mocket-artif
 
 将生成的 `public/moonbit/mocket-js-artifacts.json.gz` 一起提交。生成脚本只收集 JS target 的依赖接口和 core 文件，并排除 examples。
 
+## 部署
+
+生产环境必须在**文档及其所有静态资源**上返回以下响应头，否则 WebContainer 无法传输 `SharedArrayBuffer`：
+
+```http
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
+```
+
+仓库根目录的 `vercel.json` 已为 Vercel 部署配置了这些头。部署后可用以下命令确认：
+
+```bash
+curl -I https://playground.mocket.oboard.fun/
+```
+
+响应中应包含以上两个 `Cross-Origin-*` 头，浏览器控制台中 `crossOriginIsolated` 应为 `true`。
+
 ## 验证
 
 ```bash
