@@ -12,6 +12,7 @@ import {
 import { getMocketJavaScriptArtifacts } from "./lib/mocketArtifacts";
 import { installMoonbitWasmToolchain, moonbitWasmToolchainBin } from "./lib/moonbitWasmToolchain";
 import { startMoonWebBridge, type MoonWebRequest, type MoonWebResponse } from "./lib/moonWebBridge";
+import { examples, getExample, type ExampleId } from "./examples";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -79,59 +80,6 @@ const runtimeFiles: Record<string, string> = {
     null,
     2,
   ),
-};
-
-const exampleTemplates: Record<string, string> = {
-  hello: `/// A minimal Mocket hello world — visit /hello/MoonBit to see the greeting.
-async fn main {
-  let app = @mocket.App()
-
-  app.get("/hello/:name", event => {
-    let name = event.params.get("name").unwrap_or("World")
-    "Hello, \\{name}!"
-  })
-
-  app.listen(":4000")
-}
-`,
-  params: `async fn main {
-  let app = @mocket.App()
-  app.use_middleware(@cors.handle_cors())
-
-  // Visit /hello/MoonBit to read a named route parameter.
-  app.get("/hello/:name", event => {
-    let name = event.params.get("name").unwrap_or("World")
-    "Hello, \\{name}!"
-  })
-
-  app.listen(":4000")
-}
-`,
-  api: `async fn main {
-  let app = @mocket.App()
-  app.use_middleware(@cors.handle_cors())
-
-  app.group("/api", group => {
-    group.get("/status", _ => {
-      ({ "ok": true, "framework": "mocket" } : Json)
-    })
-  })
-
-  app.listen(":4000")
-}
-`,
-  echo: `async fn main {
-  let app = @mocket.App()
-  app.use_middleware(@cors.handle_cors())
-
-  app.post("/echo", event => {
-    let body : Bytes = event.req.body()
-    body
-  })
-
-  app.listen(":4000")
-}
-`,
 };
 
 const activePath = ref("/src/main.mbt");
@@ -378,8 +326,9 @@ function resetTerminalHeight() {
   terminalHeight.value = 270;
 }
 
-function loadExample(name: keyof typeof exampleTemplates) {
-  files.value["/src/main.mbt"] = exampleTemplates[name];
+function loadExample(name: ExampleId) {
+  const example = getExample(name);
+  files.value["/src/main.mbt"] = example.code;
   activePath.value = "/src/main.mbt";
   examplesOpen.value = false;
   dirty.value = true;
@@ -953,7 +902,7 @@ async function formatCurrentFile() {
 }
 
 function resetProject() {
-  files.value["/src/main.mbt"] = exampleTemplates.hello;
+  files.value["/src/main.mbt"] = getExample("hello").code;
   activePath.value = "/src/main.mbt";
   dirty.value = true;
   runtimeNotice.value =
@@ -992,13 +941,14 @@ onBeforeUnmount(() => {
         <div class="examples-menu">
           <button class="nav-link" @click="examplesOpen = !examplesOpen">Examples ▾</button>
           <div v-if="examplesOpen" class="examples-popover">
-            <button @click="loadExample('hello')">
-              <b>Hello world</b><span>/hello/:name</span></button
-            ><button @click="loadExample('params')">
-              <b>Route parameters</b><span>/:name</span></button
-            ><button @click="loadExample('api')">
-              <b>API group</b><span>/api/status JSON</span></button
-            ><button @click="loadExample('echo')"><b>POST echo</b><span>request body</span></button>
+            <button
+              v-for="example in examples"
+              :key="example.name"
+              @click="loadExample(example.name)"
+            >
+              <b>{{ example.label }}</b
+              ><span>{{ example.subtitle }}</span>
+            </button>
           </div>
         </div>
       </nav>
