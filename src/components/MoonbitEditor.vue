@@ -3,12 +3,19 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as moonbitMode from "@moonbit/moonpad-monaco";
 import * as monaco from "monaco-editor-core";
 import MonacoEditorWorker from "monaco-editor-core/esm/vs/editor/editor.worker?worker";
+import { checkMocketProjectInBrowser, type MoonBitDiagnostic } from "../lib/moonbitCompiler";
+import { getMocketJavaScriptArtifacts } from "../lib/mocketArtifacts";
 
 type TraceEvent =
   | { kind: "success"; filePath: string; output: string }
   | { kind: "error"; filePath: string; message: string };
 
-const props = defineProps<{ modelValue: string; filePath: string }>();
+const props = defineProps<{
+  modelValue: string;
+  filePath: string;
+  projectFiles: Record<string, string>;
+  dependencyAware: boolean;
+}>();
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   trace: [event: TraceEvent];
@@ -23,7 +30,7 @@ let traceTimer: ReturnType<typeof setTimeout> | undefined;
 let latestTrace = 0;
 
 // This is the MoonBit Tour integration: it registers MoonBit tokens, language
-// configuration, diagnostics, completions, hover and the in-browser compiler.
+// configuration, completions, hover and the in-browser compiler.
 const moonpad = moonbitMode.init({
   onigWasmUrl: new URL("@moonbit/moonpad-monaco/onig.wasm", import.meta.url).toString(),
 });
@@ -39,6 +46,76 @@ function isMoonBitFile(path: string) {
 
 function languageForPath(path: string) {
   return isMoonBitFile(path) ? "moonbit" : "plaintext";
+}
+
+function pathMatchesModel(path: string | undefined, currentModel: monaco.editor.ITextModel) {
+  if (!path) return true;
+  const normalized = path.replaceAll("\\", "/").replace(/^\/+/, "");
+  const modelPath = currentModel.uri.path.replace(/^\/+/, "");
+  const filename = normalized.split("/").at(-1);
+  return (
+    normalized === modelPath ||
+    normalized.endsWith(`/${modelPath}`) ||
+    modelPath.endsWith(`/${normalized}`) ||
+    filename === modelPath.split("/").at(-1)
+  );
+}
+
+function markerForDiagnostic(
+  diagnostic: MoonBitDiagnostic,
+  currentModel: monaco.editor.ITextModel,
+): monaco.editor.IMarkerData {
+  const maxLine = currentModel.getLineCount();
+  const startLineNumber = Math.max(1, Math.min(diagnostic.start?.line ?? 1, maxLine));
+  const endLineNumber = Math.max(
+    startLineNumber,
+    Math.min(diagnostic.end?.line ?? startLineNumber, maxLine),
+  );
+  const startColumn = Math.max(
+    1,
+    Math.min(diagnostic.start?.col ?? 1, currentModel.getLineMaxColumn(startLineNumber)),
+  );
+  const endColumn = Math.max(
+    startColumn + 1,
+    Math.min(diagnostic.end?.col ?? startColumn + 1, currentModel.getLineMaxColumn(endLineNumber)),
+  );
+  return {
+    startLineNumber,
+    startColumn,
+    endLineNumber,
+    endColumn,
+    message: diagnostic.message,
+    code: diagnostic.errorCode?.toString(),
+    source: "MoonBit",
+    severity:
+      diagnostic.level === "warning"
+        ? monaco.MarkerSeverity.Warning
+        : diagnostic.level === "info"
+          ? monaco.MarkerSeverity.Info
+          : monaco.MarkerSeverity.Error,
+  };
+}
+
+function isMocketCompilerEntrypointNoise(diagnostic: MoonBitDiagnostic) {
+  return (
+    diagnostic.errorCode === 67 ||
+    /Main function is already defined at .*main\.mbt:1:1\.$/.test(diagnostic.message)
+  );
+}
+
+function setDependencyMarkers(
+  currentModel: monaco.editor.ITextModel,
+  diagnostics: MoonBitDiagnostic[],
+) {
+  const markers = diagnostics
+    .filter((diagnostic) => pathMatchesModel(diagnostic.path, currentModel))
+    .map((diagnostic) => markerForDiagnostic(diagnostic, currentModel));
+  monaco.editor.setModelMarkers(currentModel, "moonbit", []);
+  monaco.editor.setModelMarkers(currentModel, "moonbit-mocket", markers);
+}
+
+function clearDependencyMarkers(currentModel: monaco.editor.ITextModel) {
+  monaco.editor.setModelMarkers(currentModel, "moonbit-mocket", []);
 }
 
 /**
@@ -64,10 +141,55 @@ function formatMoonBitIndentation(source: string) {
     .replace(/\n{3,}/g, "\n\n");
 }
 
-function scheduleTrace(delay = 140) {
+function scheduleTrace(delay = 220) {
   if (!model || !isMoonBitFile(props.filePath)) return;
   if (traceTimer) clearTimeout(traceTimer);
   traceTimer = setTimeout(() => void traceCurrentModel(), delay);
+}
+
+async function checkDependencyAwareProject(
+  currentModel: monaco.editor.ITextModel,
+  traceId: number,
+  version: number,
+  filePath: string,
+) {
+  const projectFiles = { ...props.projectFiles, [filePath]: currentModel.getValue() };
+  const result = await checkMocketProjectInBrowser({
+    files: projectFiles,
+    artifacts: await getMocketJavaScriptArtifacts(),
+  });
+  const isCurrent =
+    traceId === latestTrace &&
+    currentModel === model &&
+    version === currentModel.getVersionId() &&
+    filePath === props.filePath;
+  if (!isCurrent) return undefined;
+
+  // moonpad's private buildPackage call has no moon.pkg input. For an
+  // executable async fn main it can emit compiler error 67 even though the
+  // same source links and runs through linkMocketProject. Suppress only that
+  // bridge artifact; Mocket and async package diagnostics remain visible.
+  const diagnostics = result.diagnostics.filter(
+    (diagnostic) => !isMocketCompilerEntrypointNoise(diagnostic),
+  );
+  setDependencyMarkers(currentModel, diagnostics);
+  const hasActionableError = diagnostics.some((diagnostic) => diagnostic.level === "error");
+  if (result.kind === "error" && hasActionableError) {
+    const message =
+      diagnostics.map((diagnostic) => diagnostic.message).join("\n") || result.message;
+    emit("trace", { kind: "error", filePath, message });
+    return undefined;
+  }
+
+  const warningCount = diagnostics.filter((diagnostic) => diagnostic.level === "warning").length;
+  emit("trace", {
+    kind: "success",
+    filePath,
+    output: warningCount
+      ? `Mocket + async workspace check passed with ${warningCount} warning${warningCount === 1 ? "" : "s"}.`
+      : "Mocket + async workspace check passed.",
+  });
+  return "";
 }
 
 async function traceCurrentModel() {
@@ -77,6 +199,14 @@ async function traceCurrentModel() {
   const version = currentModel.getVersionId();
   const filePath = props.filePath;
   try {
+    // Moonpad's public trace service is strictly single-file. For a Mocket
+    // project, call its bundled compiler primitive with the same injected .mi
+    // interfaces used by Run, then publish diagnostics back to Monaco.
+    if (props.dependencyAware) {
+      return await checkDependencyAwareProject(currentModel, traceId, version, filePath);
+    }
+
+    clearDependencyMarkers(currentModel);
     // `traceCommandFactory` is the same trace path used by MoonBit Tour. It
     // places value decorations in Monaco and returns stdout for the console.
     const output = await trace(currentModel.uri.toString());
@@ -166,6 +296,11 @@ watch(
     model.setValue(value);
     muted = false;
   },
+);
+
+watch(
+  () => props.dependencyAware,
+  () => scheduleTrace(0),
 );
 
 async function runSingleFile() {

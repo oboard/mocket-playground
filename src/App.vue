@@ -6,6 +6,7 @@ import WebTerminal from "./components/WebTerminal.vue";
 import ApiClient from "./components/ApiClient.vue";
 import { compileMocketToJavaScript, compileMoonBitToJavaScript } from "./lib/moonbitCompiler";
 import { getMocketJavaScriptArtifacts } from "./lib/mocketArtifacts";
+import { installMoonbitWasmToolchain, moonbitWasmToolchainBin } from "./lib/moonbitWasmToolchain";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -49,7 +50,7 @@ fn main {
 }
 `,
   "/src/routes.mbt": `/// Put shared route handlers here as the app grows.
-pub fn greeting() -> String {
+pub fn route_greeting() -> String {
   "Hello, Mocket!"
 }
 `,
@@ -58,7 +59,8 @@ pub fn greeting() -> String {
 - **Compile** uses MoonBit’s browser compiler and requires no local toolchain.
 - Mocket, moonbitlang/async, and Mocket CORS artifacts are bundled for the JavaScript target; the first Mocket Run downloads the offline bundle once.
 - **LSP trace** runs as you type for MoonBit files and decorates values in the editor.
-- **Format** normalizes indentation in the browser; use \`moon fmt\` in a full MoonBit workspace for canonical project formatting.
+- **Format** normalizes indentation in the browser. The WebContainer terminal includes the official Wasm tools: \`moonc\`, \`moonfmt\`, and \`mooninfo\`.
+- The upstream Wasm archive does not include the Rust \`moon\` package manager, so dependency-aware Mocket builds continue to use the browser compiler.
 `,
 });
 
@@ -146,8 +148,10 @@ const runtimeNotice = ref(
 const runtimeState = ref<"idle" | "booting" | "running" | "error">("idle");
 const previewUrl = ref("");
 const terminalReady = ref(false);
+const moonbitToolchainVersion = ref("");
 const webcontainer = ref<WebContainer | null>(null);
 const serverProcess = ref<Awaited<ReturnType<WebContainer["spawn"]>> | null>(null);
+let bootedWebcontainer: WebContainer | null = null;
 const entries = ref<FileEntry[]>([]);
 const compileGeneration = ref(0);
 const expandedFolders = ref(new Set<string>(["/", "/src"]));
@@ -323,17 +327,38 @@ async function bootWebContainer() {
   runtimeNotice.value = "Booting isolated WebContainer workspace…";
   try {
     const instance = await WebContainer.boot({ workdirName: "mocket-starter" });
-    webcontainer.value = instance;
+    bootedWebcontainer = instance;
     await instance.mount(asWebContainerTree());
-    instance.on("server-ready", (_port, url) => {
+    runtimeNotice.value = "Installing official MoonBit Wasm compiler tools in WebContainer…";
+    const toolchain = await installMoonbitWasmToolchain(instance);
+    moonbitToolchainVersion.value = toolchain.version;
+    const updatePreview = (port: number, url: string) => {
       previewUrl.value = url;
       runtimeState.value = "running";
-      runtimeNotice.value = `WebContainer preview listening at ${url}`;
+      runtimeNotice.value = `Mocket is listening on port ${port} at ${url}`;
+    };
+    // `server-ready` is only emitted for a conventional preview server. Mocket
+    // uses Node's `http.Server` directly, for which WebContainer reports the
+    // lower-level port lifecycle event instead. Listen to both so the API
+    // client always receives the genuine Mocket preview URL.
+    instance.on("server-ready", updatePreview);
+    instance.on("port", (port, type, url) => {
+      if (type === "open") {
+        updatePreview(port, url);
+      } else if (previewUrl.value === url) {
+        previewUrl.value = "";
+        if (runtimeState.value === "running") {
+          runtimeState.value = "idle";
+          runtimeNotice.value = `WebContainer port ${port} closed.`;
+        }
+      }
     });
+    // Publish the container only after the toolchain is in place. This keeps
+    // the interactive terminal from racing the installer on a fresh browser.
+    webcontainer.value = instance;
     await refreshExplorer();
     runtimeState.value = "idle";
-    runtimeNotice.value =
-      "Workspace mounted. Compile MoonBit in the browser, then Run writes the generated JavaScript to WebContainer Node.";
+    runtimeNotice.value = `Workspace mounted with MoonBit Wasm tools ${toolchain.version}. Use moonc, moonfmt, or mooninfo in the terminal; browser Compile still powers full Mocket runs.`;
   } catch (error) {
     runtimeState.value = "error";
     runtimeNotice.value = `WebContainer unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -387,6 +412,14 @@ async function pipeProgramOutput(process: Awaited<ReturnType<WebContainer["spawn
         write(chunk) {
           output += chunk;
           compilerOutput.value = output || "Program is running in WebContainer…";
+          // Mocket's own Node server has confirmed that it bound its port. The
+          // API client can now issue requests from inside the same WebContainer
+          // even if the host browser has not exposed an iframe preview URL.
+          if (output.includes("[mocket] listening")) {
+            runtimeState.value = "running";
+            runtimeNotice.value =
+              "Mocket is listening on port 4000 inside WebContainer. The API client connects to the real Node server directly.";
+          }
         },
       }),
     );
@@ -449,13 +482,30 @@ async function runProject() {
       "/.mocket-runtime/main.mjs",
       new TextDecoder().decode(result.js),
     );
+    // Keep runtime failures observable in the compiler panel. This wrapper does
+    // not implement HTTP itself: it only imports the real Mocket program.
+    await webcontainer.value.fs.writeFile(
+      "/.mocket-runtime/run.mjs",
+      `import { Server } from "node:http";
+process.on("uncaughtException", error => console.error(error?.stack || error));
+process.on("unhandledRejection", error => console.error(error?.stack || error));
+const listen = Server.prototype.listen;
+Server.prototype.listen = function (...args) {
+  console.log("[mocket] http.Server.listen", args.slice(0, 2));
+  this.once("listening", () => console.log("[mocket] listening", this.address()));
+  this.once("error", error => console.error("[mocket] server error", error?.stack || error));
+  return listen.apply(this, args);
+};
+await import("./main.mjs");
+`,
+    );
     await refreshExplorer();
     compilerState.value = "success";
     compilerOutput.value = `Built /.mocket-runtime/main.mjs${
       hasMocketDependencies ? " with Mocket + async artifacts" : ""
     }. Starting Node in WebContainer…`;
     runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
-    const process = await webcontainer.value.spawn("node", [".mocket-runtime/main.mjs"]);
+    const process = await webcontainer.value.spawn("node", [".mocket-runtime/run.mjs"]);
     serverProcess.value = process;
     void pipeProgramOutput(process);
   } catch (error) {
@@ -589,7 +639,14 @@ onMounted(() => {
   void bootWebContainer();
 });
 
-onBeforeUnmount(() => stopResizing?.());
+onBeforeUnmount(() => {
+  stopResizing?.();
+  void serverProcess.value?.kill();
+  // WebContainer permits only one live instance. Release both a fully mounted
+  // workspace and one still installing so browser reload/HMR can boot again.
+  bootedWebcontainer?.teardown();
+  bootedWebcontainer = null;
+});
 </script>
 
 <template>
@@ -700,6 +757,8 @@ onBeforeUnmount(() => stopResizing?.());
             ref="editorRef"
             v-model="editorValue"
             :file-path="activePath"
+            :project-files="files"
+            :dependency-aware="usesMocketDependencies()"
             @trace="handleEditorTrace"
           />
         </div>
@@ -720,7 +779,12 @@ onBeforeUnmount(() => stopResizing?.());
             >
             <pre>{{ compilerOutput }}</pre>
           </div>
-          <WebTerminal :container="webcontainer" @ready="terminalReady = true" />
+          <WebTerminal
+            :container="webcontainer"
+            :moonbit-bin="moonbitWasmToolchainBin"
+            :moonbit-version="moonbitToolchainVersion"
+            @ready="terminalReady = true"
+          />
         </div>
         <div class="statusbar">
           <span>{{ activePath.split("/").pop() }}</span

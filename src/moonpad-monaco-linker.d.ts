@@ -19,6 +19,14 @@ declare module "@moonbit/moonpad-monaco" {
     exportedFunctions?: string[];
   };
 
+  type MoonpadProjectInput = MoonpadLinkInput & {
+    /** All project .mbt files, with paths relative to the virtual workspace. */
+    files?: [string, string][];
+    pkg: string;
+    pkgSources: string[];
+    miFiles: [string, Uint8Array][];
+  };
+
   type MoonpadLinkResult =
     | { kind: "success"; js: Uint8Array; diagnostics: MoonpadDiagnostic[] }
     | {
@@ -28,19 +36,20 @@ declare module "@moonbit/moonpad-monaco" {
         message: string;
       };
 
-  type MoonpadMocketProjectLinkInput = MoonpadLinkInput & {
-    pkg: string;
-    pkgSources: string[];
-    miFiles: [string, Uint8Array][];
-    coreFiles: Uint8Array[];
-  };
+  type MoonpadProjectCheckResult =
+    | { kind: "success"; diagnostics: MoonpadDiagnostic[] }
+    | { kind: "error"; diagnostics: MoonpadDiagnostic[]; message: string };
 
   /**
    * Exported by this app's Vite compatibility transform. Moonpad 0.2.0 ships
-   * the linker in its browser bundle but omits it from the package entrypoint.
+   * these compiler primitives in its browser bundle but omits them from the
+   * package entrypoint.
    */
   export function linkSingleFile(input: string | MoonpadLinkInput): Promise<MoonpadLinkResult>;
+  export function checkMocketProject(
+    input: MoonpadProjectInput,
+  ): Promise<MoonpadProjectCheckResult>;
   export function linkMocketProject(
-    input: MoonpadMocketProjectLinkInput,
+    input: MoonpadProjectInput & { coreFiles: Uint8Array[] },
   ): Promise<MoonpadLinkResult>;
 }

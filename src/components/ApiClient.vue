@@ -46,6 +46,9 @@ const logs = ref<RequestLog[]>([]);
 
 const canHaveBody = computed(() => !["GET", "HEAD"].includes(method.value));
 const formattedBaseUrl = computed(() => props.baseUrl || "http://localhost:4000");
+const hasRequestTransport = computed(
+  () => Boolean(props.baseUrl) || Boolean(props.isRuntimeReady && props.executeRequest),
+);
 const responseLabel = computed(() => {
   if (sending.value) return "Sending…";
   if (responseStatus.value === null) return "No response";
@@ -122,9 +125,9 @@ async function sendRequest() {
   responseHeaders.value = [];
   const started = performance.now();
 
-  if (!props.baseUrl) {
+  if (!hasRequestTransport.value) {
     responseText.value =
-      "Start the workspace first. The request will use the preview URL as its base address.";
+      "Start the workspace first. The request will run against the real Mocket server in WebContainer.";
     responseStatus.value = 503;
     responseTime.value = `${Math.round(performance.now() - started)} ms`;
     responseSize.value = readableSize(responseText.value);

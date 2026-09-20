@@ -5,7 +5,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { WebContainer, WebContainerProcess } from "@webcontainer/api";
 
-const props = defineProps<{ container: Pick<WebContainer, "spawn"> | null }>();
+const props = defineProps<{
+  container: Pick<WebContainer, "spawn" | "path"> | null;
+  moonbitBin: string;
+  moonbitVersion: string;
+}>();
 const emit = defineEmits<{ ready: [] }>();
 const host = ref<HTMLElement | null>(null);
 let terminal: Terminal | undefined;
@@ -18,6 +22,7 @@ async function startShell() {
   if (!props.container || shellProcess || !terminal) return;
   fitAddon?.fit();
   shellProcess = await props.container.spawn("jsh", {
+    env: { PATH: `${props.moonbitBin}:${props.container.path}` },
     terminal: { cols: terminal.cols, rows: terminal.rows },
   });
   shellProcess.output.pipeTo(
@@ -31,7 +36,10 @@ async function startShell() {
   const inputSubscription = terminal.onData((data) => void input.write(data));
   disposeInput = () => inputSubscription.dispose();
   terminal.writeln(
-    "\x1b[36mMocket workspace ready — use the shell exactly as you would locally.\x1b[0m",
+    `\x1b[36mMocket workspace ready — official MoonBit Wasm tools ${props.moonbitVersion || "installed"}: moonc, moonfmt, mooninfo.\x1b[0m`,
+  );
+  terminal.writeln(
+    "\x1b[90mThe full `moon` package manager is not in the upstream Wasm archive; use browser Compile for dependency-aware Mocket builds.\x1b[0m",
   );
   emit("ready");
 }

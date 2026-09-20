@@ -20,40 +20,69 @@ function moonpadLinkerExport() {
       }
       const linkerName = match[1];
       const mocketLinker = `
-async function __mocketLinkProject(input) {
+function __mocketProjectInput(input) {
   const source = typeof input === "string" ? { code: input } : input;
   const filename = (source.filename || "main.mbt").replace(/^\\/+/, "");
-  const pkg = source.pkg || "playground/mocket-starter";
-  const build = await wt({
-    mbtFiles: [[filename, source.code]],
+  const inputFiles = Array.isArray(source.files) && source.files.length > 0
+    ? source.files
+    : [[filename, source.code]];
+  // Model URIs can be absolute while explorer paths are relative. Normalize
+  // aliases first so buildPackage never receives main.mbt twice.
+  const fileMap = new Map();
+  for (const [path, code] of inputFiles) fileMap.set(path.replace(/^\\/+/, ""), code);
+  const files = [...fileMap.entries()];
+  return {
+    source,
+    pkg: source.pkg || "playground/mocket-starter",
+    mbtFiles: files,
+    pkgSources: source.pkgSources || [],
     miFiles: source.miFiles || [],
+    debugMain: source.debugMain || false,
+    enableValueTracing: source.enableValueTracing || false
+  };
+}
+async function __mocketBuildProject(input) {
+  const project = __mocketProjectInput(input);
+  const build = await wt({
+    mbtFiles: project.mbtFiles,
+    miFiles: project.miFiles,
     stdMiFiles: St(),
     target: "js",
-    pkg,
-    pkgSources: source.pkgSources || [],
+    pkg: project.pkg,
+    pkgSources: project.pkgSources,
     isMain: true,
-    enableValueTracing: source.enableValueTracing || false,
+    enableValueTracing: project.enableValueTracing,
     errorFormat: "json",
-    noOpt: source.debugMain || false,
+    noOpt: project.debugMain,
     indirectImportMiFiles: []
   });
-  const diagnostics = Jt(build.diagnostics);
+  return { project, build, diagnostics: Jt(build.diagnostics) };
+}
+async function __mocketCheckProject(input) {
+  const { build, diagnostics } = await __mocketBuildProject(input);
+  if (build.core === void 0 || build.mi === void 0) {
+    return { kind: "error", diagnostics, message: Ht(diagnostics) };
+  }
+  return { kind: "success", diagnostics };
+}
+async function __mocketLinkProject(input) {
+  const { project, build, diagnostics } = await __mocketBuildProject(input);
   if (build.core === void 0 || build.mi === void 0) {
     return { kind: "error", stage: "build", diagnostics, message: Ht(diagnostics) };
   }
   try {
     const linked = await Ft({
-      coreFiles: [...await ft("js"), ...(source.coreFiles || []), build.core],
-      exportedFunctions: source.exportedFunctions || [],
-      main: pkg,
+      coreFiles: [...await ft("js"), ...(project.source.coreFiles || []), build.core],
+      exportedFunctions: project.source.exportedFunctions || [],
+      main: project.pkg,
       outputFormat: "wasm",
-      pkgSources: source.pkgSources || [],
+      pkgSources: project.pkgSources,
       sources: {},
       target: "js",
       testMode: false,
       sourceMap: false,
       debug: false,
-      noOpt: source.debugMain || false,
+      noOpt: project.debugMain,
       stopOnMain: false
     });
     return { kind: "success", js: linked.result, diagnostics };
@@ -63,7 +92,7 @@ async function __mocketLinkProject(input) {
 }
 `;
       return {
-        code: `${code}\n${mocketLinker}\nexport { ${linkerName} as linkSingleFile, __mocketLinkProject as linkMocketProject };\n`,
+        code: `${code}\n${mocketLinker}\nexport { ${linkerName} as linkSingleFile, __mocketCheckProject as checkMocketProject, __mocketLinkProject as linkMocketProject };\n`,
         map: null,
       };
     },
