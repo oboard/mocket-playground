@@ -28,9 +28,19 @@ declare module "@moonbit/moonpad-monaco" {
         message: string;
       };
 
+  type MoonpadMocketProjectLinkInput = MoonpadLinkInput & {
+    pkg: string;
+    pkgSources: string[];
+    miFiles: [string, Uint8Array][];
+    coreFiles: Uint8Array[];
+  };
+
   /**
    * Exported by this app's Vite compatibility transform. Moonpad 0.2.0 ships
    * the linker in its browser bundle but omits it from the package entrypoint.
    */
   export function linkSingleFile(input: string | MoonpadLinkInput): Promise<MoonpadLinkResult>;
+  export function linkMocketProject(
+    input: MoonpadMocketProjectLinkInput,
+  ): Promise<MoonpadLinkResult>;
 }

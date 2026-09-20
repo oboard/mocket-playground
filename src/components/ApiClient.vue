@@ -11,8 +11,19 @@ type RequestLog = {
 };
 
 type Header = { enabled: boolean; key: string; value: string };
+type RuntimeRequest = {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+};
+type RuntimeResponse = { status: number; headers: string[]; body: string };
 
-const props = defineProps<{ baseUrl: string; isRuntimeReady: boolean }>();
+const props = defineProps<{
+  baseUrl: string;
+  isRuntimeReady: boolean;
+  executeRequest?: (request: RuntimeRequest) => Promise<RuntimeResponse>;
+}>();
 
 const method = ref("GET");
 const path = ref("/api/hello");
@@ -56,7 +67,12 @@ function readableSize(value: string) {
 
 function activeHeaders() {
   return headers.value.reduce<Record<string, string>>((result, header) => {
-    if (header.enabled && header.key.trim()) result[header.key.trim()] = header.value;
+    const key = header.key.trim();
+    // Postman does not send a JSON content type for a body-less GET/HEAD.
+    // Avoid an unnecessary CORS preflight when calling the WebContainer preview.
+    if (header.enabled && key && (canHaveBody.value || key.toLowerCase() !== "content-type")) {
+      result[key] = header.value;
+    }
     return result;
   }, {});
 }
@@ -87,6 +103,19 @@ function saveRequest() {
   }, 1600);
 }
 
+async function fetchFromPreview(request: RuntimeRequest): Promise<RuntimeResponse> {
+  const response = await fetch(new URL(request.path, props.baseUrl), {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+  });
+  return {
+    status: response.status,
+    headers: Array.from(response.headers.entries()).map(([key, value]) => `${key}: ${value}`),
+    body: await response.text(),
+  };
+}
+
 async function sendRequest() {
   sending.value = true;
   responseStatus.value = null;
@@ -112,12 +141,16 @@ async function sendRequest() {
   }
 
   try {
-    const response = await fetch(new URL(path.value, props.baseUrl), {
+    const request = {
       method: method.value,
+      path: path.value,
       headers: activeHeaders(),
       body: canHaveBody.value && body.value ? body.value : undefined,
-    });
-    const result = await response.text();
+    };
+    const response = props.executeRequest
+      ? await props.executeRequest(request)
+      : await fetchFromPreview(request);
+    const result = response.body;
     try {
       responseText.value = JSON.stringify(JSON.parse(result), null, 2);
     } catch {
@@ -126,9 +159,7 @@ async function sendRequest() {
     responseStatus.value = response.status;
     responseTime.value = `${Math.round(performance.now() - started)} ms`;
     responseSize.value = readableSize(result);
-    responseHeaders.value = Array.from(response.headers.entries()).map(
-      ([key, value]) => `${key}: ${value}`,
-    );
+    responseHeaders.value = response.headers;
     logs.value.unshift({
       method: method.value,
       path: path.value,

@@ -1,4 +1,5 @@
-import { linkSingleFile } from "@moonbit/moonpad-monaco";
+import { linkMocketProject, linkSingleFile } from "@moonbit/moonpad-monaco";
+import type { MocketJavaScriptArtifacts } from "./mocketArtifacts";
 
 export type MoonBitDiagnostic = {
   level: "warning" | "error" | "info";
@@ -30,6 +31,24 @@ export async function compileMoonBitToJavaScript(input: {
   return linkSingleFile({
     code: input.code,
     filename: input.filename ?? "main.mbt",
+    debugMain: false,
+  });
+}
+
+/** Compiles a Mocket entrypoint against the prebuilt offline JS artifact bundle. */
+export async function compileMocketToJavaScript(input: {
+  code: string;
+  filename?: string;
+  artifacts: MocketJavaScriptArtifacts;
+}): Promise<MoonBitJavaScriptBuild> {
+  const pkg = "playground/mocket-starter";
+  return linkMocketProject({
+    code: input.code,
+    filename: input.filename ?? "main.mbt",
+    pkg,
+    pkgSources: [`${pkg}:playground:/workspace`, ...input.artifacts.pkgSources],
+    miFiles: input.artifacts.miFiles,
+    coreFiles: input.artifacts.coreFiles,
     debugMain: false,
   });
 }

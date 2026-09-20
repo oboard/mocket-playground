@@ -1,5 +1,44 @@
-# Vue 3 + TypeScript + Vite
+# Mocket Playground
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+一个无需本地 MoonBit 工具链的浏览器内 Mocket 开发环境。它使用 Moonpad 的浏览器编译器生成 JavaScript，将结果写入 WebContainer，并由其中的 Node.js 实际启动 Mocket 服务。
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## 开箱即用的依赖
+
+首次运行包含 `@mocket` 的项目时，页面会从同站点加载预构建的 JS 依赖包：
+
+- `oboard/mocket`
+- `moonbitlang/async` 及其 JS target 传递依赖
+- Mocket 的 `cors`、`uri`、`multipart`、`internal/header` 等 package
+- `moonbitlang/x` 的编译期/运行期依赖
+
+产物位于 `public/moonbit/mocket-js-artifacts.json.gz`，包含 33 个 `.mi` 接口和 33 个 `.core` 文件。因此普通用户不需要安装 MoonBit、Mooncakes 或 npm 依赖即可编译和运行 Mocket 示例。
+
+## 使用方式
+
+1. 启动开发服务器：`vp dev`。
+2. 在 Explorer 中编辑 `src/main.mbt`，或从 **Examples** 选择路由示例。
+3. 点击 **Run**：浏览器链接 MoonBit 到 JavaScript，WebContainer Node 启动生成的服务。
+4. 在右侧 **API client** 输入例如 `GET /hello/MoonBit` 并发送请求。
+
+API Client 的请求会由 WebContainer 内的 Node 发往 `127.0.0.1:4000`，而不是由外层浏览器直接跨域访问预览域名；这使 Postman 风格的本地请求能稳定访问真实运行中的 Mocket 服务。
+
+## 更新内置 Mocket 依赖包
+
+在 Mocket 仓库编译 JS release 产物后，重新生成离线包：
+
+```bash
+moon build --target js --release examples/route
+MOCKET_SOURCE=/absolute/path/to/oboard/mocket node scripts/generate-mocket-artifacts.mjs
+```
+
+将生成的 `public/moonbit/mocket-js-artifacts.json.gz` 一起提交。生成脚本只收集 JS target 的依赖接口和 core 文件，并排除 examples。
+
+## 验证
+
+```bash
+vp check
+vp run build
+vp test
+```
+
+当前仓库还没有测试文件，因此 `vp test` 会按 Vitest 的默认行为以 `No test files found` 退出；前两条命令应通过。

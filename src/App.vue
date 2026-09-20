@@ -4,7 +4,8 @@ import { WebContainer, type FileSystemTree } from "@webcontainer/api";
 import MoonbitEditor from "./components/MoonbitEditor.vue";
 import WebTerminal from "./components/WebTerminal.vue";
 import ApiClient from "./components/ApiClient.vue";
-import { compileMoonBitToJavaScript } from "./lib/moonbitCompiler";
+import { compileMocketToJavaScript, compileMoonBitToJavaScript } from "./lib/moonbitCompiler";
+import { getMocketJavaScriptArtifacts } from "./lib/mocketArtifacts";
 
 type EntryKind = "file" | "folder";
 type FileEntry = { name: string; path: string; kind: EntryKind; depth: number };
@@ -28,7 +29,13 @@ version = "0.1.0"
 source = "src"
 preferred_target = "js"
 `,
-  "/src/moon.pkg": `supported_targets = "+js"
+  "/src/moon.pkg": `import {
+  "moonbitlang/async",
+  "oboard/mocket",
+  "oboard/mocket/cors",
+}
+
+supported_targets = "+js"
 
 pkgtype(kind: "executable")
 `,
@@ -49,6 +56,7 @@ pub fn greeting() -> String {
   "/README.md": `# Mocket Playground
 
 - **Compile** uses MoonBit’s browser compiler and requires no local toolchain.
+- Mocket, moonbitlang/async, and Mocket CORS artifacts are bundled for the JavaScript target; the first Mocket Run downloads the offline bundle once.
 - **LSP trace** runs as you type for MoonBit files and decorates values in the editor.
 - **Format** normalizes indentation in the browser; use \`moon fmt\` in a full MoonBit workspace for canonical project formatting.
 `,
@@ -78,6 +86,7 @@ fn main {
 `,
   params: `async fn main {
   let app = @mocket.App()
+  app.use_middleware(@cors.handle_cors())
 
   // Visit /hello/MoonBit to read a named route parameter.
   app.get("/hello/:name", event => {
@@ -90,6 +99,7 @@ fn main {
 `,
   api: `async fn main {
   let app = @mocket.App()
+  app.use_middleware(@cors.handle_cors())
 
   app.group("/api", group => {
     group.get("/status", _ => {
@@ -102,6 +112,7 @@ fn main {
 `,
   echo: `async fn main {
   let app = @mocket.App()
+  app.use_middleware(@cors.handle_cors())
 
   app.post("/echo", event => {
     let body : Bytes = event.req.body()
@@ -118,7 +129,6 @@ const editorValue = computed({
   get: () => files.value[activePath.value] ?? "",
   set: (value: string) => {
     files.value[activePath.value] = value;
-    mocketRuntimeBlocked.value = false;
     dirty.value = true;
     if (webcontainer.value) void webcontainer.value.fs.writeFile(activePath.value, value);
   },
@@ -138,7 +148,6 @@ const previewUrl = ref("");
 const terminalReady = ref(false);
 const webcontainer = ref<WebContainer | null>(null);
 const serverProcess = ref<Awaited<ReturnType<WebContainer["spawn"]>> | null>(null);
-const mocketRuntimeBlocked = ref(false);
 const entries = ref<FileEntry[]>([]);
 const compileGeneration = ref(0);
 const expandedFolders = ref(new Set<string>(["/", "/src"]));
@@ -398,21 +407,17 @@ async function pipeProgramOutput(process: Awaited<ReturnType<WebContainer["spawn
 }
 
 async function runProject() {
-  // Do this before awaiting WebContainer boot. The editor's background trace
-  // can otherwise overwrite this actionable project-level diagnostic.
-  if (usesMocketDependencies()) {
-    mocketRuntimeBlocked.value = true;
-    runtimeState.value = "error";
-    compilerState.value = "error";
-    const message =
-      "This starter has Mocket imports, but its JS dependency artifacts are not loaded yet. " +
-      "Moonpad’s bundled linker contains MoonBit core only, so it cannot truthfully build @mocket.App() until the Mocket/async/x .mi and .core bundle is added.";
-    compilerOutput.value = message;
-    runtimeNotice.value = message;
-    return;
-  }
+  const hasMocketDependencies = usesMocketDependencies();
 
-  mocketRuntimeBlocked.value = false;
+  compilerState.value = "compiling";
+  compilerOutput.value = hasMocketDependencies
+    ? "Loading built-in Mocket + async JavaScript artifacts…"
+    : "Compiling /src/main.mbt to JavaScript in your browser…";
+  runtimeState.value = "booting";
+  runtimeNotice.value = hasMocketDependencies
+    ? "Preparing the offline Mocket JavaScript compiler for WebContainer Node…"
+    : "Linking standalone MoonBit JavaScript for WebContainer Node…";
+
   await bootWebContainer();
   if (!webcontainer.value) return;
   await syncFiles();
@@ -421,16 +426,16 @@ async function runProject() {
     serverProcess.value = null;
   }
   previewUrl.value = "";
-  runtimeState.value = "booting";
-  compilerState.value = "compiling";
-  compilerOutput.value = "Compiling /src/main.mbt to JavaScript in your browser…";
-  runtimeNotice.value = "Linking standalone MoonBit JavaScript for WebContainer Node…";
 
   try {
-    const result = await compileMoonBitToJavaScript({
-      code: files.value["/src/main.mbt"] ?? "",
-      filename: "main.mbt",
-    });
+    const source = files.value["/src/main.mbt"] ?? "";
+    const result = hasMocketDependencies
+      ? await compileMocketToJavaScript({
+          code: source,
+          filename: "main.mbt",
+          artifacts: await getMocketJavaScriptArtifacts(),
+        })
+      : await compileMoonBitToJavaScript({ code: source, filename: "main.mbt" });
     if (result.kind === "error") {
       compilerState.value = "error";
       runtimeState.value = "error";
@@ -446,7 +451,9 @@ async function runProject() {
     );
     await refreshExplorer();
     compilerState.value = "success";
-    compilerOutput.value = "Built /.mocket-runtime/main.mjs. Starting Node in WebContainer…";
+    compilerOutput.value = `Built /.mocket-runtime/main.mjs${
+      hasMocketDependencies ? " with Mocket + async artifacts" : ""
+    }. Starting Node in WebContainer…`;
     runtimeNotice.value = "Running browser-compiled MoonBit JavaScript with WebContainer Node…";
     const process = await webcontainer.value.spawn("node", [".mocket-runtime/main.mjs"]);
     serverProcess.value = process;
@@ -460,6 +467,50 @@ async function runProject() {
   }
 }
 
+async function executeRuntimeRequest(request: {
+  method: string;
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+}) {
+  if (!webcontainer.value) throw new Error("WebContainer has not started yet.");
+
+  const requestedUrl = new URL(request.path, "http://mocket.local");
+  const payload = {
+    ...request,
+    url: `http://127.0.0.1:4000${requestedUrl.pathname}${requestedUrl.search}`,
+  };
+  const script = `
+const request = JSON.parse(process.argv[1]);
+const response = await fetch(request.url, {
+  method: request.method,
+  headers: request.headers,
+  body: request.body,
+});
+const body = await response.text();
+process.stdout.write(JSON.stringify({
+  status: response.status,
+  headers: Array.from(response.headers.entries()).map(([key, value]) => key + ": " + value),
+  body,
+}));
+`;
+  const process = await webcontainer.value.spawn("node", ["-e", script, JSON.stringify(payload)]);
+  const reader = process.output.getReader();
+  let output = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    output += value;
+  }
+  const exitCode = await process.exit;
+  if (exitCode !== 0) throw new Error(output || `Node request exited with code ${exitCode}.`);
+  try {
+    return JSON.parse(output) as { status: number; headers: string[]; body: string };
+  } catch {
+    throw new Error(output || "The runtime returned an invalid API response.");
+  }
+}
+
 async function openFile(path: string, kind: EntryKind) {
   if (kind !== "file") return;
   if (webcontainer.value) files.value[path] = await webcontainer.value.fs.readFile(path, "utf-8");
@@ -468,7 +519,6 @@ async function openFile(path: string, kind: EntryKind) {
 
 function handleEditorTrace(event: TraceEvent) {
   if (
-    mocketRuntimeBlocked.value ||
     event.filePath !== activePath.value ||
     !activeIsMoonBit.value ||
     compilerState.value === "compiling"
@@ -698,6 +748,7 @@ onBeforeUnmount(() => stopResizing?.());
           v-if="sidebarTab === 'api'"
           :base-url="previewUrl"
           :is-runtime-ready="runtimeState === 'running'"
+          :execute-request="executeRuntimeRequest"
         />
         <section v-else class="sidebar-preview">
           <div class="preview-heading">
